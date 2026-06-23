@@ -1,0 +1,25 @@
+# Secrets / local config
+.env
+terraform/terraform.tfvars
+*.auto.tfvars
+*.DS_Store
+*.vscode/
+*.pem
+
+# Terraform state & local dirs
+*.terraform/
+terraform/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfstate.*
+crash.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+uv.lock
+
+# pptx files
+*.pptx
