@@ -1,0 +1,34 @@
+# terraform.tfvars.example
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+#
+# AWS auth via the usual AWS_PROFILE / AWS_ACCESS_KEY_ID etc.
+
+name_prefix       = "ch-aws-workshop"
+aws_region        = "us-east-1"
+clickhouse_region = "us-east-1"
+
+# --- ClickHouse Cloud API auth (see providers.tf) ---
+# Create the API key in the Cloud console: Organization -> API keys.
+clickhouse_organization_id = "<org-uuid>"   # CLICKHOUSE_ORG_ID
+clickhouse_token_key       = "<key-id>"     # CLICKHOUSE_CLOUD_API_KEY
+clickhouse_token_secret    = "<key-secret>" # CLICKHOUSE_CLOUD_API_SECRET
+
+# --- Secrets (do NOT commit the real terraform.tfvars) ---
+clickhouse_password      = "change-me-strong-password"
+aurora_master_password   = "change-me-strong-password"
+clickpipes_user_password = "change-me-strong-password"
+
+# --- Aurora public ingress (seeding only) ---
+# ClickPipes connects privately over PrivateLink, so it does NOT need to be
+# listed here. Only add your own /32 so the seed scripts can reach Aurora's
+# public endpoint.
+clickpipes_ingress_cidrs = [
+  # "203.0.113.10/32",   # your laptop IP (for seeding)
+]
+
+# --- Pipe toggles ---
+# Phase 1: leave both false, apply, bootstrap Aurora + start producers.
+# Phase 2: flip to true and apply again to create the pipes.
+enable_postgres_clickpipe = false
+enable_kinesis_clickpipe  = false
+enable_generator_ec2      = false

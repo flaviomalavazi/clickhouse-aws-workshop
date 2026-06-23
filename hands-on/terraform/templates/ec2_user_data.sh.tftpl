@@ -1,0 +1,35 @@
+#!/bin/bash
+# Cloud-init user_data for the workshop data-generator EC2.
+# Deliberately thin: write the (non-secret) config, clone the repo, then hand off
+# to the committed bootstrap script. All output lands in
+# /var/log/cloud-init-output.log. Every $${...} below is a Terraform-injected value.
+set -euxo pipefail
+
+# Non-secret config consumed by ec2_bootstrap.sh. Secrets are NOT here — they are
+# pulled from SSM Parameter Store by the bootstrap using the parameter names below.
+cat > /etc/ch-workshop.env <<EOF
+REPO_URL=${repo_url}
+REPO_BRANCH=${repo_branch}
+AWS_REGION=${aws_region}
+KINESIS_STREAM_NAME=${kinesis_stream_name}
+PG_HOST=${pg_host}
+PG_DATABASE=${pg_database}
+PG_USER=${pg_user}
+SSM_PG_PASSWORD=${ssm_pg_password}
+SSM_CLICKPIPES_PASSWORD=${ssm_clickpipes_password}
+CDC_SLEEP=${cdc_sleep}
+KINESIS_RATE=${kinesis_rate}
+CLONE_DIR=/opt/ch-workshop
+EOF
+
+dnf install -y git
+
+# Clone (idempotent on a re-run / replaced instance).
+if [ ! -d /opt/ch-workshop/.git ]; then
+  git clone --branch ${repo_branch} --depth 1 ${repo_url} /opt/ch-workshop
+else
+  git -C /opt/ch-workshop pull --ff-only || true
+fi
+
+# Hand off to the versioned bootstrap script.
+exec bash /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh

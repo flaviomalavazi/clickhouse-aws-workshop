@@ -1,0 +1,23 @@
+[project]
+name = "ch-aws-workshop"
+version = "0.1.0"
+description = "Python tooling for the ClickHouse + AWS workshop: Aurora migration runner and mock-data generators (seed Aurora PostgreSQL, simulate CDC traffic, produce Kinesis events)."
+requires-python = ">=3.10"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "boto3>=1.34",
+    "faker>=25.0",
+    "python-dotenv>=1.0",
+]
+
+# Flat-script project (no installable package): every .py file under mock_data/
+# is run directly with `uv run`. uv discovers this pyproject by walking up from
+# the current directory, so the commands work from hands-on/ or hands-on/mock_data/.
+#
+#   uv sync                                   # create the venv from this file
+#   uv run mock_data/run_migrations.py        # apply sql/aurora/*.sql to Aurora
+#   uv run mock_data/seed_rds.py              # initial Aurora load
+#   uv run mock_data/simulate_cdc.py          # live Postgres CDC traffic
+#   uv run mock_data/kinesis_producer.py      # live Kinesis events
+[tool.uv]
+package = false
