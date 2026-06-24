@@ -1,5 +1,7 @@
 # Terraform — ClickHouse Cloud + AWS ingestion
 
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · related: [Generator EC2](../EC2_GENERATOR.md)
+
 Provisions, in one stack:
 
 - `clickhouse.tf` — a **ClickHouse Cloud** service (`clickhouse_service`).

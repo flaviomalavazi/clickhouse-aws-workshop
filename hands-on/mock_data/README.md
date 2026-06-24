@@ -1,5 +1,7 @@
 # Mock data + Aurora migrations
 
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · run these on a server instead: [Generator EC2](../EC2_GENERATOR.md)
+
 A small uv project: one migration runner plus three data generators.
 
 | Script | Target | What it does |

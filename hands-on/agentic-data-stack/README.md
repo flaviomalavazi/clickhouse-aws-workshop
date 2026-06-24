@@ -1,7 +1,9 @@
 # Lab 4 — Agentic Data Stack (and how to observe it)
 
-Maps to the morning hands-on bullet: *"ClickHouse Cloud: Agentic Data Stack (y
-cómo observarlo)"* and to the afternoon Langfuse session.
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · next: [Langfuse lab](../langfuse/README.md)
+
+Maps to the morning hands-on bullet *"ClickHouse Cloud: Agentic Data Stack (and
+how to observe it)"* and to the afternoon Langfuse session.
 
 The [ClickHouse Agentic Data Stack](https://github.com/ClickHouse/agentic-data-stack)
 is a fully self-hosted, Docker-Compose bundle that puts a chat UI in front of
@@ -46,7 +48,7 @@ Instead of the public demo cluster, configure the MCP server with your own
 ClickHouse Cloud service from `../terraform` so the agent can answer questions
 over `raw.orders`, `raw.events_raw`, and `marts.events_by_minute`:
 
-```
+```ini
 CLICKHOUSE_HOST=<your-service>.clickhouse.cloud
 CLICKHOUSE_PORT=8443
 CLICKHOUSE_USER=default

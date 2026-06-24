@@ -1,5 +1,7 @@
 # ClickHouse + AWS Workshop — Hands-on
 
+> **Workshop:** [top-level README](../README.md) · **also in this folder:** [Terraform](terraform/README.md) · [Generators & migrations](mock_data/README.md) · [Generator EC2](EC2_GENERATOR.md) · [Agentic stack](agentic-data-stack/README.md) · [Langfuse](langfuse/README.md)
+
 End-to-end lab environment for the ClickHouse + AWS workshop. You provision a
 **ClickHouse Cloud** service with Terraform, ingest from **Aurora PostgreSQL
 (CDC)** and **Amazon Kinesis** via **ClickPipes**, build an **Incremental
@@ -11,7 +13,7 @@ Stack** observed with **Langfuse**.
 
 ## Architecture
 
-```
+```text
                     AWS                                  ClickHouse Cloud
    ┌─────────────────────────────────┐         ┌──────────────────────────────────┐
    │  Aurora PostgreSQL (OLTP)        │         │  raw.customers  raw.orders        │
@@ -35,7 +37,7 @@ Stack** observed with **Langfuse**.
 `hands-on/` is the **uv project root** — one `pyproject.toml` and `.venv` cover
 every Python script in the repo.
 
-```
+```text
 hands-on/
 ├── pyproject.toml        # the uv project (all Python deps for the repo)
 ├── .python-version       # pinned Python for uv
@@ -134,13 +136,13 @@ terraform apply
 
 | Deck section (morning) | Hands-on artefact |
 |------------------------|-------------------|
-| ClickHouse Cloud → **Ingesta de datos** (Flink / S3 / **ClickPipes**) | `terraform/clickpipes.tf`, `terraform/aurora.tf`, `terraform/kinesis.tf` |
-| **Separación compute-storage / compute-compute** | `terraform/clickhouse.tf` (autoscaling envelope); discuss warehouses while queries run |
-| **BigQuery (migraciones)** | Slides + `docs note`: BigQuery snapshot ClickPipe / GCS-Parquet path (no lab infra) |
-| Hands-on: **Ingesta desde RDS y Kinesis** | Phases 1–2 above |
+| ClickHouse Cloud → **Data ingestion** (Flink / S3 / **ClickPipes**) | `terraform/clickpipes.tf`, `terraform/aurora.tf`, `terraform/kinesis.tf` |
+| **Compute-storage / compute-compute separation** | `terraform/clickhouse.tf` (autoscaling envelope); discuss warehouses while queries run |
+| **BigQuery (migrations)** | Slides + `docs note`: BigQuery snapshot ClickPipe / GCS-Parquet path (no lab infra) |
+| Hands-on: **Ingesting from RDS and Kinesis** | Phases 1–2 above |
 | Hands-on: **Incremental MV + AggregatingMergeTree** | `sql/clickhouse/01_materialized_views.sql`, `sql/clickhouse/02_demo_queries.sql` |
-| Hands-on: **Agentic Data Stack (y cómo observarlo)** | `agentic-data-stack/` |
-| Afternoon: **Langfuse — Observabilidad / Prompts / Experimentos** | `langfuse/` |
+| Hands-on: **Agentic Data Stack (and how to observe it)** | `agentic-data-stack/` |
+| Afternoon: **Langfuse — Observability / Prompts / Experiments** | `langfuse/` |
 
 ## Teardown
 

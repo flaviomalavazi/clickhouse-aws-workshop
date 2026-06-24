@@ -1,5 +1,7 @@
 # In-VPC data-generator EC2
 
+> [← Hands-on guide](README.md) · [Workshop README](../README.md) · defined in [terraform/ec2.tf](terraform/ec2.tf)
+
 An optional EC2 instance that runs the workshop's data generators **from inside the
 Aurora VPC**, so you don't depend on your laptop's network or allowlist a rotating
 public IP.

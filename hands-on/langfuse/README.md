@@ -1,7 +1,9 @@
 # Lab 5 (optional, afternoon) — Langfuse workshop
 
-Maps to the afternoon agenda: *Observabilidad y LLMOps en sistemas agénticos —
-Langfuse (Observabilidad, Prompt Management, Experimentos)* + the optional
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · comes after: [Agentic stack](../agentic-data-stack/README.md)
+
+Maps to the afternoon agenda: *Observability & LLMOps in agentic systems —
+Langfuse (Observability, Prompt Management, Experiments)* + the optional
 hands-on.
 
 This lab is delivered from a dedicated repo (kept separate so attendees can run
