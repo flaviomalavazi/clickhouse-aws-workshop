@@ -12,6 +12,11 @@ Provisions, in one stack:
   NLB + VPC endpoint service in front of Aurora, plus the ClickPipes
   `clickhouse_clickpipes_reverse_private_endpoint`. ClickPipes reaches Aurora
   privately instead of over the public internet.
+- `ec2.tf` — **optional in-VPC generator EC2** (gated by `enable_generator_ec2`):
+  self-bootstraps (clone repo → migrate → seed → run generators as a systemd
+  service), connects to Aurora over its private IP, writes to Kinesis via an
+  instance role, and is reachable by SSM Session Manager (no SSH/keys). DB
+  passwords are passed via SSM SecureString parameters. See `../EC2_GENERATOR.md`.
 
 ## Providers
 
@@ -34,6 +39,11 @@ provider **3.14+**.
 Why: the Postgres pipe needs the `clickpipes_pub` publication and
 `clickpipes_user` to exist first; both pipes are happier when their sources are
 already emitting data.
+
+Step 2 can be done from your laptop **or** by the in-VPC generator EC2: set
+`enable_generator_ec2 = true` and `repo_url = "<public git url>"`, apply, and it
+runs the migrations, seed, and generators for you (`../EC2_GENERATOR.md`). Manage
+it between demos with `../scripts/generator_ec2.sh {start|stop|status}`.
 
 ## Notes / gotchas
 

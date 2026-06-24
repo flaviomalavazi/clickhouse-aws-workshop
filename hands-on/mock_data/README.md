@@ -56,3 +56,15 @@ from inside `mock_data/` (drop the `mock_data/` prefix).
 
 `config.py` reads everything from environment variables / `.env`. AWS credentials
 for `kinesis_producer.py` come from your usual `AWS_PROFILE` or access keys.
+
+## Resilience (built for flaky networks / long demos)
+
+- **Preflight + auto-reconnect**: `simulate_cdc.py` waits (with exponential backoff)
+  until Aurora is reachable, and if the connection drops mid-run it reconnects and
+  resumes instead of crashing. Real SQL/programming errors still surface loudly.
+- `kinesis_producer.py` skips a batch and retries on a transient AWS/network error
+  rather than exiting.
+- `run_generators.py` shuts both children down cleanly on Ctrl-C, and if one exits
+  on its own it stops the other (so a half-running demo fails loudly).
+- TLS to Aurora defaults to `PGSSLMODE=verify-full` against `sql/aurora/global-bundle.pem`
+  (the public endpoint's cert is validated); set `PGSSLMODE=require` to skip verification.

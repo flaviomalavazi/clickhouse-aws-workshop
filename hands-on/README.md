@@ -40,7 +40,8 @@ hands-on/
 ├── pyproject.toml        # the uv project (all Python deps for the repo)
 ├── .python-version       # pinned Python for uv
 ├── .env.example          # copy to .env; read by every script
-├── terraform/            # ClickHouse Cloud service + Aurora + Kinesis + both ClickPipes
+├── EC2_GENERATOR.md      # optional in-VPC EC2 that self-runs the generators
+├── terraform/            # ClickHouse Cloud + Aurora + Kinesis + ClickPipes + PrivateLink + (optional) generator EC2
 ├── sql/
 │   ├── aurora/                    # PostgreSQL migrations (run by mock_data/run_migrations.py)
 │   │   ├── 01_setup.sql           #   schema, clickpipes_user, publication
@@ -48,7 +49,8 @@ hands-on/
 │   └── clickhouse/                # run in the ClickHouse SQL console
 │       ├── 01_materialized_views.sql  # incremental MV + AggregatingMergeTree
 │       └── 02_demo_queries.sql        # demo queries (streaming + CDC + unified join)
-├── mock_data/            # the Python scripts: run_migrations.py, seed_rds.py, simulate_cdc.py, kinesis_producer.py
+├── mock_data/            # Python scripts: run_migrations.py, seed_rds.py, simulate_cdc.py, kinesis_producer.py, run_generators.py
+├── scripts/              # ec2_bootstrap.sh (runs on the EC2), generator_ec2.sh (start/stop the EC2 from your laptop)
 ├── agentic-data-stack/   # Lab 4: run the agentic stack, observe it
 └── langfuse/             # Lab 5 (afternoon): Langfuse workshop pointer
 ```
@@ -103,6 +105,13 @@ uv run mock_data/run_generators.py                # CDC + Kinesis, runs until st
 > Prefer separate terminals? Run `uv run mock_data/simulate_cdc.py` and
 > `uv run mock_data/kinesis_producer.py` individually instead.
 
+**Don't want to run generators from your laptop?** Set `enable_generator_ec2 = true`
+and `repo_url` in `terraform.tfvars`, then `terraform apply`. An in-VPC EC2 clones
+the repo, runs the migrations + seed, and runs the generators as a systemd service —
+reaching Aurora over its **private** IP (no laptop network, no IP allowlisting).
+See **[EC2_GENERATOR.md](EC2_GENERATOR.md)**. Stop/start it between demos to save
+cost with `scripts/generator_ec2.sh {stop|start|status}`.
+
 ### Phase 2b — create the ClickPipes
 ```bash
 cd ../terraform
@@ -146,8 +155,12 @@ Kinesis stream. (Stop the Python producers first.)
 
 - The default `ip_access_list` opens the ClickHouse endpoint to `0.0.0.0/0` for a
   throwaway workshop — **tighten it** for anything beyond the lab.
-- `clickpipes_ingress_cidrs` is intentionally empty: add the region-specific
-  ClickPipes static NAT IPs (and optionally your laptop IP for seeding).
-- Aurora is `publicly_accessible = true` so ClickPipes can reach it over the
-  internet; use **AWS PrivateLink** for private connectivity in production.
+- **ClickPipes reaches Aurora privately over AWS PrivateLink** (`terraform/privatelink.tf`),
+  so ClickPipes static NAT IPs are **not** needed. `clickpipes_ingress_cidrs` only
+  needs your laptop `/32` if you seed Aurora from your laptop over its public endpoint.
+- Aurora is `publicly_accessible = true` only so laptop seeding works; the in-VPC
+  generator EC2 avoids that entirely (private IP). TLS to Aurora defaults to
+  `verify-full` against the RDS CA bundle.
+- The optional generator EC2 runs ~24/7 — **stop it between demos** with
+  `scripts/generator_ec2.sh stop` (you keep only the small EBS charge).
 - Run `terraform destroy` at the end of the day to avoid lingering charges.

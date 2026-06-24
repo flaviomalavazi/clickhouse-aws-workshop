@@ -139,9 +139,21 @@ sudo bash "/opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh"
 
 ## Teardown / cost
 
-The instance runs ~24/7 (a `t3.small`). To remove everything, set
-`enable_generator_ec2 = false` and `terraform apply`. The SSM SecureString parameters and
-IAM role are destroyed with it.
+The instance runs ~24/7 (a `t3.small`). Between demos, **stop** it instead of
+destroying — you keep only the small EBS charge, and on start the generators
+auto-resume (the service is `enabled`):
+
+```bash
+hands-on/scripts/generator_ec2.sh stop      # power off to save cost
+hands-on/scripts/generator_ec2.sh start     # power on + resume generators
+hands-on/scripts/generator_ec2.sh status    # instance + service status
+```
+
+(The script reads the instance id/region from `terraform output`; override with
+`INSTANCE_ID`/`AWS_REGION` env vars.)
+
+To remove everything, set `enable_generator_ec2 = false` and `terraform apply` —
+the SSM SecureString parameters and IAM role are destroyed with it.
 
 ## Run order with the EC2
 

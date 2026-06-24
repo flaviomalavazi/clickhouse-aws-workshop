@@ -91,7 +91,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=HOME=/root
+# PYTHONUNBUFFERED so the generators' stdout streams to journald in real time
+# (otherwise Python block-buffers stdout when it's not a TTY and logs look "stuck").
+Environment=HOME=/root PYTHONUNBUFFERED=1
 EnvironmentFile=/etc/ch-workshop-runtime.env
 WorkingDirectory=$HANDS_ON
 ExecStart=/usr/local/bin/uv run mock_data/run_generators.py --cdc-sleep $CDC_SLEEP --kinesis-rate $KINESIS_RATE
