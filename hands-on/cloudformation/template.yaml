@@ -1,0 +1,588 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::LanguageExtensions
+
+Description: >-
+  ClickHouse AWS workshop — CloudFormation alternative to the Terraform AWS stack
+  (hands-on/terraform/). Mirrors the AWS half: Aurora PostgreSQL (CDC source),
+  a Kinesis stream, the IAM role ClickPipes assumes to read it, and an optional
+  in-VPC data-generator EC2. The ONE intended difference vs Terraform: instead of
+  PrivateLink (NLB + VPC endpoint service + reverse private endpoint), Aurora is
+  reached by allow-listing ClickPipes' static egress IPs on the Aurora security
+  group. The ClickHouse Cloud service and the ClickPipes themselves are NOT created
+  here (they are ClickHouse-provider resources) — see README.md for the manual UI
+  steps. Terraform remains the source of truth.
+
+############################################################
+# Metadata — console parameter grouping
+############################################################
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Naming & networking" }
+        Parameters: [NamePrefix, VpcId, SubnetIds]
+      - Label: { default: "Aurora PostgreSQL" }
+        Parameters:
+          - AuroraEngineVersion
+          - AuroraInstanceClass
+          - AuroraDatabaseName
+          - AuroraMasterUsername
+          - AuroraMasterPassword
+          - ClickpipesUserPassword
+      - Label: { default: "Aurora ingress (ClickPipes static IPs + seeding)" }
+        Parameters: [ClickPipesIngressCidrsOverride, SeedIngressCidrs]
+      - Label: { default: "Kinesis & ClickPipes role" }
+        Parameters: [KinesisStreamMode, KinesisShardCount, ClickHouseIamPrincipalArn]
+      - Label: { default: "Optional in-VPC generator EC2" }
+        Parameters:
+          - EnableGeneratorEc2
+          - RepoUrl
+          - RepoBranch
+          - Ec2InstanceType
+          - GeneratorCdcSleep
+          - GeneratorKinesisRate
+          - Al2023Ami
+    ParameterLabels:
+      ClickHouseIamPrincipalArn: { default: "ClickHouse service IAM principal ARN" }
+
+############################################################
+# Parameters — mirror hands-on/terraform/terraform.tfvars
+############################################################
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: ch-aws-workshop
+    Description: Prefix applied to created resource names.
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]{1,40}$"
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: >-
+      VPC to place Aurora (and the optional generator EC2) in. Use the region's
+      default VPC unless you have a reason not to. CFN cannot auto-discover the
+      default VPC the way Terraform's data sources do, so this is explicit.
+
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: >-
+      At least two subnets in different AZs for the Aurora DB subnet group. Use the
+      default VPC's (public) subnets — ClickPipes reaches Aurora over the public
+      endpoint via the allow-listed static IPs, and the generator EC2 needs a public
+      subnet for outbound (SSM/GitHub/Kinesis) since there is no NAT gateway.
+
+  AuroraEngineVersion:
+    Type: String
+    Default: "17.7"
+    Description: Aurora PostgreSQL engine version (must be 12+ for ClickPipes CDC; family below pins 17).
+
+  AuroraInstanceClass:
+    Type: String
+    Default: db.t4g.medium
+    Description: Instance class for the Aurora writer.
+
+  AuroraDatabaseName:
+    Type: String
+    Default: appdb
+    Description: Initial database created in the Aurora cluster.
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,62}$"
+
+  AuroraMasterUsername:
+    Type: String
+    Default: postgres
+    Description: Aurora master (admin) username.
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9_]{0,62}$"
+
+  AuroraMasterPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Aurora master password. 8+ chars; avoid '/', '@', '"' and spaces (RDS restriction).
+
+  ClickpipesUserPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: >-
+      Password for the dedicated clickpipes_user role ClickPipes uses to read Aurora.
+      Used by the seed/migration scripts to create the role; entered again in the
+      ClickPipes UI when the Postgres pipe is created.
+
+  ClickHouseIamPrincipalArn:
+    Type: String
+    Default: ""
+    Description: >-
+      The ClickHouse Cloud service's IAM principal ARN (the "Service role ID (IAM)"
+      in the Cloud console). Trusted by the Kinesis role so ClickPipes can assume it.
+      Create the ClickHouse service FIRST, then deploy with this value. Leave empty
+      only if you will not use the Kinesis ClickPipe.
+
+  KinesisStreamMode:
+    Type: String
+    Default: ON_DEMAND
+    AllowedValues: [ON_DEMAND, PROVISIONED]
+    Description: Kinesis capacity mode.
+
+  KinesisShardCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    Description: Shard count when KinesisStreamMode = PROVISIONED (ignored for ON_DEMAND).
+
+  ClickPipesIngressCidrsOverride:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >-
+      Optional. Comma-separated /32 CIDRs to allow inbound to Aurora on 5432,
+      used INSTEAD of the baked us-east-1 static-IP Mapping. The always-current
+      escape hatch when the baked list goes stale, and the way to deploy in a
+      region other than us-east-1. See the ClickPipes static-IP docs (README).
+
+  SeedIngressCidrs:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >-
+      Optional. Comma-separated CIDRs (e.g. your laptop's <ip>/32) allowed inbound
+      to Aurora on 5432 so the seed/migration scripts can reach it from outside the
+      VPC. Not needed if you use the generator EC2.
+
+  EnableGeneratorEc2:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Create an in-VPC EC2 that self-bootstraps (clone -> migrate -> seed -> run
+      generators). Reaches Aurora over its private IP (SG-to-SG), so no public-IP
+      allow-listing is needed for seeding.
+
+  RepoUrl:
+    Type: String
+    Default: ""
+    Description: Public HTTPS git URL of this workshop repo, cloned by the generator EC2. Required when EnableGeneratorEc2 = true.
+
+  RepoBranch:
+    Type: String
+    Default: main
+    Description: Git branch the generator EC2 checks out.
+
+  Ec2InstanceType:
+    Type: String
+    Default: t3.small
+    Description: Instance type for the generator EC2.
+
+  GeneratorCdcSleep:
+    Type: Number
+    Default: 1
+    Description: Seconds between simulated CDC mutations on the generator EC2 (run_generators.py --cdc-sleep).
+
+  GeneratorKinesisRate:
+    Type: Number
+    Default: 10
+    Description: Kinesis events per second produced by the generator EC2 (run_generators.py --kinesis-rate).
+
+  Al2023Ami:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: >-
+      AL2023 AMI, resolved from the public SSM alias at deploy time (ships the SSM
+      agent for Session Manager). Leave the default.
+
+############################################################
+# Mappings — ClickPipes static egress IPs by region
+#   Verified against https://clickhouse.com/docs/integrations/clickpipes
+#   (#list-of-static-ips). us-east-1 only, per workshop decision; other regions
+#   use ClickPipesIngressCidrsOverride. NOTE: these can change with date-based
+#   caveats — the override param is the mitigation if they go stale.
+############################################################
+Mappings:
+  ClickPipesEgressIps:
+    us-east-1:
+      Cidrs:
+        - 54.82.38.199/32
+        - 3.90.133.29/32
+        - 52.5.177.8/32
+        - 3.227.227.145/32
+        - 3.216.6.184/32
+        - 54.84.202.92/32
+        - 3.131.130.196/32
+        - 3.23.172.68/32
+        - 3.20.208.150/32
+
+############################################################
+# Conditions
+############################################################
+Conditions:
+  # Override supplied -> use it instead of the region Mapping.
+  UseOverride: !Not [!Equals [!Join ["", !Ref ClickPipesIngressCidrsOverride], ""]]
+  # Use the baked Mapping only in us-east-1 AND when no override is given.
+  UseRegionMap: !And
+    - !Equals [!Ref "AWS::Region", "us-east-1"]
+    - !Not [!Condition UseOverride]
+  # Seed CIDRs supplied.
+  HasSeedCidrs: !Not [!Equals [!Join ["", !Ref SeedIngressCidrs], ""]]
+  # Optional generator EC2.
+  EnableEc2: !Equals [!Ref EnableGeneratorEc2, "true"]
+  # Kinesis PROVISIONED mode needs an explicit shard count.
+  IsProvisioned: !Equals [!Ref KinesisStreamMode, "PROVISIONED"]
+
+############################################################
+# Resources
+############################################################
+Resources:
+
+  ##########################################################
+  # Aurora PostgreSQL — CDC source for ClickPipes
+  ##########################################################
+
+  # Cluster parameter group: enable logical replication (required for CDC).
+  # rds.logical_replication and wal_sender_timeout are static -> applied on the
+  # reboot RDS performs when the group is attached at create time.
+  AuroraClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: !Sub "${NamePrefix} Aurora PG params for ClickPipes CDC (logical replication)"
+      Family: aurora-postgresql17
+      Parameters:
+        rds.logical_replication: "1"
+        wal_sender_timeout: "0"
+
+  AuroraDbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "${NamePrefix} Aurora subnet group"
+      SubnetIds: !Ref SubnetIds
+
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${NamePrefix} - ClickPipes (static IPs) + workshop access to Aurora 5432"
+      VpcId: !Ref VpcId
+      # Egress left to the default (allow-all) — Aurora needs no special egress.
+      Tags:
+        - { Key: Name, Value: !Sub "${NamePrefix}-aurora-sg" }
+
+  # --- Aurora ingress, source 1: baked us-east-1 ClickPipes static IPs ---------
+  # One AWS::EC2::SecurityGroupIngress per IP. &{Cidr} lets the dotted IP form a
+  # valid logical ID; FindInMap's DefaultValue [] means a non-us-east-1 region
+  # expands to zero rules instead of erroring. Gated by UseRegionMap.
+  "Fn::ForEach::AuroraCpIngress":
+    - Cidr
+    - !FindInMap [ClickPipesEgressIps, !Ref "AWS::Region", Cidrs, { DefaultValue: [] }]
+    - "AuroraCpIngress&{Cidr}":
+        Type: AWS::EC2::SecurityGroupIngress
+        Condition: UseRegionMap
+        Properties:
+          GroupId: !Ref AuroraSecurityGroup
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref Cidr
+          Description: !Sub "ClickPipes static egress IP ${Cidr}"
+
+  # --- Aurora ingress, source 2: override CIDRs (used instead of the Mapping) ---
+  "Fn::ForEach::AuroraOverrideIngress":
+    - Cidr
+    - !Ref ClickPipesIngressCidrsOverride
+    - "AuroraOverrideIngress&{Cidr}":
+        Type: AWS::EC2::SecurityGroupIngress
+        Condition: UseOverride
+        Properties:
+          GroupId: !Ref AuroraSecurityGroup
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref Cidr
+          Description: !Sub "ClickPipes ingress (override) ${Cidr}"
+
+  # --- Aurora ingress, source 3: seed/laptop CIDRs ----------------------------
+  "Fn::ForEach::AuroraSeedIngress":
+    - Cidr
+    - !Ref SeedIngressCidrs
+    - "AuroraSeedIngress&{Cidr}":
+        Type: AWS::EC2::SecurityGroupIngress
+        Condition: HasSeedCidrs
+        Properties:
+          GroupId: !Ref AuroraSecurityGroup
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: !Ref Cidr
+          Description: !Sub "Workshop seeding ${Cidr}"
+
+  # --- Aurora ingress, source 4: the generator EC2 (SG-to-SG) -----------------
+  # Cleaner than Terraform's VPC-CIDR rule: only the generator SG is allowed, and
+  # only when the EC2 is enabled. RDS split-horizon DNS gives the EC2 Aurora's
+  # private IP inside the VPC, so this SG-to-SG rule is what it uses.
+  AuroraGeneratorIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: EnableEc2
+    Properties:
+      GroupId: !Ref AuroraSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref GeneratorSecurityGroup
+      Description: In-VPC generator EC2
+
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    # Throwaway workshop infra — explicit Delete so `delete-stack` tears it down
+    # cleanly (mirrors Terraform skip_final_snapshot = true). Change to Snapshot/
+    # Retain for anything you care about keeping.
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # W1011 suppressed: the operator supplies the master password as a NoEcho
+    # parameter (same as Terraform), reused for the seed scripts and ClickPipes.
+    # RDS ManageMasterUserPassword would auto-generate it and complicate that flow.
+    Metadata:
+      cfn-lint: { config: { ignore_checks: [W1011] } }
+    Properties:
+      Engine: aurora-postgresql
+      EngineVersion: !Ref AuroraEngineVersion
+      DBClusterIdentifier: !Sub "${NamePrefix}-aurora-pg"
+      DatabaseName: !Ref AuroraDatabaseName
+      MasterUsername: !Ref AuroraMasterUsername
+      MasterUserPassword: !Ref AuroraMasterPassword
+      DBClusterParameterGroupName: !Ref AuroraClusterParameterGroup
+      DBSubnetGroupName: !Ref AuroraDbSubnetGroup
+      VpcSecurityGroupIds: [!Ref AuroraSecurityGroup]
+      StorageEncrypted: true   # secure default (transparent; AWS-managed aws/rds key)
+
+  AuroraInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Engine: aurora-postgresql
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceIdentifier: !Sub "${NamePrefix}-aurora-pg-1"
+      DBInstanceClass: !Ref AuroraInstanceClass
+      DBSubnetGroupName: !Ref AuroraDbSubnetGroup
+      # Public so the seed scripts (and ClickPipes' static IPs) reach Aurora over
+      # the public endpoint. This is the static-IP path's analogue of Terraform's
+      # publicly_accessible = true.
+      PubliclyAccessible: true
+
+  ##########################################################
+  # Kinesis — streaming (append-only) source + ClickPipes read role
+  ##########################################################
+
+  KinesisStream:
+    Type: AWS::Kinesis::Stream
+    Properties:
+      Name: !Sub "${NamePrefix}-events"
+      RetentionPeriodHours: 24
+      StreamModeDetails:
+        StreamMode: !Ref KinesisStreamMode
+      ShardCount: !If [IsProvisioned, !Ref KinesisShardCount, !Ref "AWS::NoValue"]
+
+  # Role ClickPipes assumes to read the stream. The NAME MUST start with
+  # "ClickHouseAccessRole-" (required by ClickPipes for Kinesis IAM-role auth) —
+  # a functional name, intentionally not auto-generated. Trust principal is the
+  # ClickHouse service's IAM principal (ClickHouseIamPrincipalArn).
+  ClickPipesKinesisRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ClickHouseAccessRole-${NamePrefix}-kinesis"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref ClickHouseIamPrincipalArn
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${NamePrefix}-kinesis-read"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: StreamLevel
+                Effect: Allow
+                Action:
+                  - kinesis:DescribeStream
+                  - kinesis:GetShardIterator
+                  - kinesis:GetRecords
+                  - kinesis:ListShards
+                  - kinesis:RegisterStreamConsumer
+                  - kinesis:DeregisterStreamConsumer
+                  - kinesis:ListStreamConsumers
+                Resource: !GetAtt KinesisStream.Arn
+              - Sid: ConsumerLevel
+                Effect: Allow
+                Action:
+                  - kinesis:SubscribeToShard
+                  - kinesis:DescribeStreamConsumer
+                Resource: !Sub "${KinesisStream.Arn}/*"
+              - Sid: ListAll
+                Effect: Allow
+                Action: kinesis:ListStreams
+                Resource: "*"
+
+  ##########################################################
+  # Optional in-VPC data-generator EC2
+  #   Divergence from Terraform: passwords live in Secrets Manager (CFN cannot
+  #   create SSM SecureString parameters). The shared bootstrap script reads them
+  #   via SECRETS_SOURCE=secretsmanager.
+  ##########################################################
+
+  # CFN can't create an SSM SecureString, so the two DB passwords go in Secrets
+  # Manager (encrypted with the AWS-managed aws/secretsmanager key by default).
+  # Names are auto-generated to avoid the "scheduled for deletion" name-reuse
+  # window if the stack is redeployed.
+  AuroraPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: EnableEc2
+    # W1011 (prefer dynamic references for secrets) is intentionally suppressed:
+    # the point of this resource is to MATERIALIZE the operator-supplied NoEcho
+    # password into Secrets Manager so the generator EC2 can read it at runtime.
+    Metadata:
+      cfn-lint: { config: { ignore_checks: [W1011] } }
+    Properties:
+      Description: !Sub "${NamePrefix} Aurora master password (read by the generator EC2)"
+      SecretString: !Ref AuroraMasterPassword
+
+  ClickpipesPasswordSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: EnableEc2
+    Metadata:
+      cfn-lint: { config: { ignore_checks: [W1011] } }
+    Properties:
+      Description: !Sub "${NamePrefix} clickpipes_user password (read by the generator EC2)"
+      SecretString: !Ref ClickpipesUserPassword
+
+  GeneratorRole:
+    Type: AWS::IAM::Role
+    Condition: EnableEc2
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      # Session Manager (keyless shell; no inbound port).
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: kinesis-produce
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                  - kinesis:DescribeStream
+                  - kinesis:DescribeStreamSummary
+                  - kinesis:ListShards
+                Resource: !GetAtt KinesisStream.Arn
+        - PolicyName: read-db-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref AuroraPasswordSecret
+                  - !Ref ClickpipesPasswordSecret
+
+  GeneratorInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: EnableEc2
+    Properties:
+      Roles: [!Ref GeneratorRole]
+
+  GeneratorSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EnableEc2
+    Properties:
+      GroupDescription: !Sub "${NamePrefix} egress-only SG for the in-VPC data generator EC2"
+      VpcId: !Ref VpcId
+      # No inbound (Session Manager needs none). Egress: SSM, GitHub, Kinesis, Aurora.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: All outbound (SSM, GitHub, Kinesis, Aurora 5432)
+      Tags:
+        - { Key: Name, Value: !Sub "${NamePrefix}-generator-sg" }
+
+  GeneratorInstance:
+    Type: AWS::EC2::Instance
+    Condition: EnableEc2
+    Properties:
+      ImageId: !Ref Al2023Ami
+      InstanceType: !Ref Ec2InstanceType
+      # First subnet from the list; must be public (default-VPC subnets are) so
+      # outbound reaches IGW — there is no NAT gateway.
+      SubnetId: !Select [0, !Ref SubnetIds]
+      SecurityGroupIds: [!Ref GeneratorSecurityGroup]
+      IamInstanceProfile: !Ref GeneratorInstanceProfile
+      Tags:
+        - { Key: Name, Value: !Sub "${NamePrefix}-generator" }
+      # Thin user_data: write the non-secret config + the SECRETS_SOURCE selector
+      # and the secret ARNs, clone the repo, hand off to the committed bootstrap.
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+
+          cat > /etc/ch-workshop.env <<EOF
+          REPO_URL=${RepoUrl}
+          REPO_BRANCH=${RepoBranch}
+          AWS_REGION=${AWS::Region}
+          KINESIS_STREAM_NAME=${KinesisStream}
+          PG_HOST=${AuroraCluster.Endpoint.Address}
+          PG_DATABASE=${AuroraDatabaseName}
+          PG_USER=${AuroraMasterUsername}
+          SECRETS_SOURCE=secretsmanager
+          SSM_PG_PASSWORD=${AuroraPasswordSecret}
+          SSM_CLICKPIPES_PASSWORD=${ClickpipesPasswordSecret}
+          CDC_SLEEP=${GeneratorCdcSleep}
+          KINESIS_RATE=${GeneratorKinesisRate}
+          CLONE_DIR=/opt/ch-workshop
+          EOF
+
+          dnf install -y git
+
+          if [ ! -d /opt/ch-workshop/.git ]; then
+            git clone --branch ${RepoBranch} --depth 1 ${RepoUrl} /opt/ch-workshop
+          else
+            git -C /opt/ch-workshop pull --ff-only || true
+          fi
+
+          exec bash /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh
+
+############################################################
+# Outputs — wire the manual ClickHouse/ClickPipes UI steps from these
+############################################################
+Outputs:
+  AuroraWriterEndpoint:
+    Description: Aurora writer endpoint — the Postgres ClickPipe host and the seed scripts' PGHOST.
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+  AuroraReaderEndpoint:
+    Description: Aurora reader endpoint.
+    Value: !GetAtt AuroraCluster.ReadEndpoint.Address
+  AuroraPort:
+    Description: Aurora port.
+    Value: !GetAtt AuroraCluster.Endpoint.Port
+  AuroraDatabaseName:
+    Description: Aurora database name.
+    Value: !Ref AuroraDatabaseName
+  AuroraSecurityGroupId:
+    Description: Aurora security group ID (where the ClickPipes static-IP ingress rules live).
+    Value: !Ref AuroraSecurityGroup
+  KinesisStreamName:
+    Description: Kinesis stream name — point the Kinesis ClickPipe (and kinesis_producer.py) here.
+    Value: !Ref KinesisStream
+  KinesisStreamArn:
+    Description: Kinesis stream ARN.
+    Value: !GetAtt KinesisStream.Arn
+  ClickPipesKinesisRoleArn:
+    Description: IAM role ARN ClickPipes assumes to read Kinesis — use as the role ARN in the Kinesis pipe.
+    Value: !GetAtt ClickPipesKinesisRole.Arn
+  GeneratorInstanceId:
+    Condition: EnableEc2
+    Description: Instance ID of the in-VPC generator EC2.
+    Value: !Ref GeneratorInstance
+  GeneratorSsmCommand:
+    Condition: EnableEc2
+    Description: Open a shell on the generator EC2 via Session Manager (no SSH/keys).
+    Value: !Sub "aws ssm start-session --target ${GeneratorInstance} --region ${AWS::Region}"

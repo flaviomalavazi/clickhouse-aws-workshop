@@ -1,6 +1,6 @@
 # ClickHouse + AWS Workshop — Hands-on
 
-> **Workshop:** [top-level README](../README.md) · **also in this folder:** [Terraform](terraform/README.md) · [Generators & migrations](mock_data/README.md) · [Generator EC2](EC2_GENERATOR.md) · [Agentic stack](agentic-data-stack/README.md) · [Langfuse](langfuse/README.md)
+> **Workshop:** [top-level README](../README.md) · **also in this folder:** [Terraform](terraform/README.md) · [CloudFormation](cloudformation/README.md) · [Generators & migrations](mock_data/README.md) · [Generator EC2](EC2_GENERATOR.md) · [Agentic stack](agentic-data-stack/README.md) · [Langfuse](langfuse/README.md)
 
 End-to-end lab environment for the ClickHouse + AWS workshop. You provision a
 **ClickHouse Cloud** service with Terraform, ingest from **Aurora PostgreSQL
@@ -43,7 +43,8 @@ hands-on/
 ├── .python-version       # pinned Python for uv
 ├── .env.example          # copy to .env; read by every script
 ├── EC2_GENERATOR.md      # optional in-VPC EC2 that self-runs the generators
-├── terraform/            # ClickHouse Cloud + Aurora + Kinesis + ClickPipes + PrivateLink + (optional) generator EC2
+├── terraform/            # ClickHouse Cloud + Aurora + Kinesis + ClickPipes + PrivateLink + (optional) generator EC2  ← source of truth
+├── cloudformation/       # no-Terraform alternative: the AWS half only (static-IP allow-listing instead of PrivateLink)
 ├── sql/
 │   ├── aurora/                    # PostgreSQL migrations (run by mock_data/run_migrations.py)
 │   │   ├── 01_setup.sql           #   schema, clickpipes_user, publication
@@ -84,6 +85,12 @@ terraform init
 terraform apply        # enable_*_clickpipe stay false for now
 terraform output       # grab aurora_writer_endpoint, kinesis_stream_name, etc.
 ```
+
+> **Can't use Terraform?** Deploy the AWS half with **CloudFormation** instead —
+> see [cloudformation/README.md](cloudformation/README.md). It builds Aurora,
+> Kinesis, and the ClickPipes IAM role (allow-listing ClickPipes' static IPs
+> rather than PrivateLink), and you create the ClickHouse service + ClickPipes
+> manually in the console. Phases 2a–4 below are otherwise identical.
 
 ### Phase 2a — bootstrap Aurora + seed data
 ```bash

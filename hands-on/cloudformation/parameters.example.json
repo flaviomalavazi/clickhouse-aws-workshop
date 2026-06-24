@@ -1,0 +1,28 @@
+[
+  { "ParameterKey": "NamePrefix", "ParameterValue": "ch-aws-workshop" },
+
+  { "ParameterKey": "VpcId", "ParameterValue": "vpc-REPLACE_ME" },
+  { "ParameterKey": "SubnetIds", "ParameterValue": "subnet-REPLACE_AZ_A,subnet-REPLACE_AZ_B" },
+
+  { "ParameterKey": "AuroraEngineVersion", "ParameterValue": "17.7" },
+  { "ParameterKey": "AuroraInstanceClass", "ParameterValue": "db.t4g.medium" },
+  { "ParameterKey": "AuroraDatabaseName", "ParameterValue": "appdb" },
+  { "ParameterKey": "AuroraMasterUsername", "ParameterValue": "postgres" },
+  { "ParameterKey": "AuroraMasterPassword", "ParameterValue": "change-me-strong-password" },
+  { "ParameterKey": "ClickpipesUserPassword", "ParameterValue": "change-me-strong-password" },
+
+  { "ParameterKey": "ClickHouseIamPrincipalArn", "ParameterValue": "arn:aws:iam::000000000000:role/REPLACE_WITH_CH_SERVICE_PRINCIPAL" },
+
+  { "ParameterKey": "KinesisStreamMode", "ParameterValue": "ON_DEMAND" },
+  { "ParameterKey": "KinesisShardCount", "ParameterValue": "2" },
+
+  { "ParameterKey": "ClickPipesIngressCidrsOverride", "ParameterValue": "" },
+  { "ParameterKey": "SeedIngressCidrs", "ParameterValue": "" },
+
+  { "ParameterKey": "EnableGeneratorEc2", "ParameterValue": "false" },
+  { "ParameterKey": "RepoUrl", "ParameterValue": "https://github.com/REPLACE_ORG/clickhouse-aws-workshop.git" },
+  { "ParameterKey": "RepoBranch", "ParameterValue": "main" },
+  { "ParameterKey": "Ec2InstanceType", "ParameterValue": "t3.small" },
+  { "ParameterKey": "GeneratorCdcSleep", "ParameterValue": "1" },
+  { "ParameterKey": "GeneratorKinesisRate", "ParameterValue": "10" }
+]

@@ -1,8 +1,9 @@
 #!/bin/bash
 # ec2_bootstrap.sh — runs on the generator EC2 (invoked by user_data as root).
 #
-# Idempotent: install uv -> uv sync -> fetch DB secrets from SSM -> apply Aurora
-# migrations -> seed once -> install & start the always-on generators service.
+# Idempotent: install uv -> uv sync -> fetch DB secrets (SSM or Secrets Manager,
+# selected by SECRETS_SOURCE) -> apply Aurora migrations -> seed once -> install
+# & start the always-on generators service.
 #
 # Secrets handling: the DB passwords (which may contain '$') are kept as shell
 # variables and passed to the Python scripts as REAL environment variables. We do
@@ -31,17 +32,33 @@ cd "$HANDS_ON"
 # 2. Create the venv + install deps (pins Python via .python-version; gives us boto3).
 uv sync
 
-# 3. Read the two SecureString secrets from SSM via the venv's boto3 (uses the
-#    instance role). Command substitution keeps the value literal — no re-expansion.
-read_ssm() {
-  uv run python - "$1" <<'PY'
+# 3. Read the two DB passwords via the venv's boto3 (uses the instance role).
+#    SECRETS_SOURCE selects the backend so the SAME bootstrap serves both deploy
+#    paths:
+#      - Terraform      -> SSM Parameter Store SecureString  (default; var unset)
+#      - CloudFormation -> AWS Secrets Manager (SECRETS_SOURCE=secretsmanager),
+#                          because CFN cannot create SSM SecureString parameters.
+#    The SSM_PG_PASSWORD / SSM_CLICKPIPES_PASSWORD values are the identifiers: an
+#    SSM parameter NAME for ssm, or a secret ID/ARN for secretsmanager.
+#    Command substitution keeps the value literal — no re-expansion.
+SECRETS_SOURCE="${SECRETS_SOURCE:-ssm}"
+read_secret() {
+  uv run python - "$SECRETS_SOURCE" "$1" <<'PY'
 import os, sys, boto3
-ssm = boto3.client("ssm", region_name=os.environ["AWS_REGION"])
-print(ssm.get_parameter(Name=sys.argv[1], WithDecryption=True)["Parameter"]["Value"], end="")
+source, ident = sys.argv[1], sys.argv[2]
+region = os.environ["AWS_REGION"]
+if source == "secretsmanager":
+    sm = boto3.client("secretsmanager", region_name=region)
+    print(sm.get_secret_value(SecretId=ident)["SecretString"], end="")
+elif source == "ssm":
+    ssm = boto3.client("ssm", region_name=region)
+    print(ssm.get_parameter(Name=ident, WithDecryption=True)["Parameter"]["Value"], end="")
+else:
+    sys.exit(f"Unknown SECRETS_SOURCE={source!r} (expected 'ssm' or 'secretsmanager')")
 PY
 }
-PG_PASSWORD="$(read_ssm "$SSM_PG_PASSWORD")"
-CLICKPIPES_PASSWORD="$(read_ssm "$SSM_CLICKPIPES_PASSWORD")"
+PG_PASSWORD="$(read_secret "$SSM_PG_PASSWORD")"
+CLICKPIPES_PASSWORD="$(read_secret "$SSM_CLICKPIPES_PASSWORD")"
 
 # 4. Export the connection env. Double-quoting a variable does NOT re-expand '$'
 #    inside its value, so passwords with '$' survive intact.

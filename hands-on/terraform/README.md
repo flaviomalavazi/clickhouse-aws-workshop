@@ -1,6 +1,12 @@
 # Terraform — ClickHouse Cloud + AWS ingestion
 
-> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · related: [Generator EC2](../EC2_GENERATOR.md)
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · related: [Generator EC2](../EC2_GENERATOR.md) · no Terraform? [CloudFormation alternative](../cloudformation/README.md)
+
+**This is the source of truth.** A [CloudFormation template](../cloudformation/README.md)
+mirrors the **AWS half** of this stack for attendees who can't use Terraform. It
+omits the ClickHouse-provider resources (service + ClickPipes) and swaps the
+PrivateLink path for ClickPipes **static-IP allow-listing**. Keep the two in step;
+edit Terraform first.
 
 Provisions, in one stack:
 

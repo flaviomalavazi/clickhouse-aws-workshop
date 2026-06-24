@@ -8,7 +8,7 @@ Materials for the workshop with the AWS Solutions Architecture team: the theory
 | Piece | What it is |
 |-------|------------|
 | `deck/` | Theory deck (33 slides): the technology, ClickHouse Cloud, AWS integrations, ClickStack, and Langfuse/LLMOps. (Slides are a `.pptx`, gitignored.) |
-| `hands-on/` | The practical project: Terraform (ClickHouse Cloud + Aurora CDC + Kinesis + ClickPipes, with **AWS PrivateLink** and an optional in-VPC **generator EC2**), SQL (incremental MV + AggregatingMergeTree), and Python data generators. |
+| `hands-on/` | The practical project: Terraform (ClickHouse Cloud + Aurora CDC + Kinesis + ClickPipes, with **AWS PrivateLink** and an optional in-VPC **generator EC2**) — or a **CloudFormation** alternative for the AWS half — plus SQL (incremental MV + AggregatingMergeTree) and Python data generators. |
 
 ## Where to start — guides in this repo
 
@@ -19,7 +19,8 @@ deeper on a specific piece:
 | Guide | What it covers | Read it when… |
 |-------|----------------|----------------|
 | [hands-on/README.md](hands-on/README.md) | The whole lab end-to-end: prerequisites, architecture diagram, the two-phase `terraform apply`, modeling in ClickHouse, teardown. | …you're setting up the workshop or want the big picture. **Start here.** |
-| [hands-on/terraform/README.md](hands-on/terraform/README.md) | The infrastructure: ClickHouse Cloud service, Aurora (CDC source), Kinesis, both ClickPipes, **PrivateLink**, and the optional **generator EC2**. Providers, two-phase apply, gotchas. | …you're applying/editing Terraform or debugging the infra. |
+| [hands-on/terraform/README.md](hands-on/terraform/README.md) | The infrastructure (**source of truth**): ClickHouse Cloud service, Aurora (CDC source), Kinesis, both ClickPipes, **PrivateLink**, and the optional **generator EC2**. Providers, two-phase apply, gotchas. | …you're applying/editing Terraform or debugging the infra. |
+| [hands-on/cloudformation/README.md](hands-on/cloudformation/README.md) | The **no-Terraform** alternative: a CloudFormation template for the **AWS half** (Aurora + Kinesis + ClickPipes IAM role + optional generator EC2), using ClickPipes **static-IP allow-listing** instead of PrivateLink. ClickHouse service + ClickPipes created manually. | …you can't/won't use Terraform but want the AWS infra. |
 | [hands-on/mock_data/README.md](hands-on/mock_data/README.md) | The Python project: the Aurora migration runner and the data generators (seed, live CDC, Kinesis), the combined `run_generators.py`, and resilience behavior. | …you're seeding/streaming data or tuning generation rates. |
 | [hands-on/EC2_GENERATOR.md](hands-on/EC2_GENERATOR.md) | The optional in-VPC EC2 that self-bootstraps and runs the generators (reaching Aurora over its private IP). How to connect via SSM, check the service, and stop/start to save cost. | …you want the generators running without your laptop/network, or need to manage that instance. |
 | [hands-on/agentic-data-stack/README.md](hands-on/agentic-data-stack/README.md) | The Agentic Data Stack lab — a chat UI over ClickHouse via MCP, with built-in LLM observability. | …you reach the agentic-stack lab. |
