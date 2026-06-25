@@ -235,14 +235,33 @@ After we've built the AWS components, we can proceed with the data ingestion:
 
 ## Teardown
 
+**Order matters.** Delete the **Kinesis ClickPipe first** (in ClickHouse), then the
+stack. The Kinesis pipe registers an enhanced fan-out **consumer** on the stream, and
+Kinesis refuses to delete a stream that still has consumers — so deleting the stack
+first fails with `DeleteStream can't delete ... because there are consumers
+associated`. CloudFormation's `AWS::Kinesis::Stream` has no `EnforceConsumerDeletion`
+property, so this is handled by ordering, not the template.
+
 ```bash
+# 1. In the ClickHouse / ClickPipes UI: delete the Kinesis pipe (and the Postgres
+#    pipe), then the ClickHouse service. CloudFormation doesn't own these.
+
+# 2. Delete the stack.
 aws cloudformation delete-stack --stack-name ch-aws-workshop
 ```
 
-Delete the **ClickPipes and the ClickHouse service in the console** separately —
-CloudFormation doesn't own them. Aurora and Kinesis have `DeletionPolicy: Delete`
-(throwaway workshop infra), so they go with the stack. The auto-named Secrets
-Manager secrets are deleted with a recovery window.
+If the stack delete already failed on the stream (it'll be in `DELETE_FAILED`), force
+the stream's consumers out and retry:
+
+```bash
+aws kinesis delete-stream --stream-name ch-aws-workshop-events \
+  --enforce-consumer-deletion --region <region>          # use your NamePrefix-events name
+aws cloudformation delete-stack --stack-name ch-aws-workshop --region <region>   # retry
+```
+
+Aurora and Kinesis have `DeletionPolicy: Delete` (throwaway workshop infra), so they
+go with the stack; the auto-named Secrets Manager secrets are deleted with a recovery
+window.
 
 ## Gotchas
 

@@ -259,8 +259,10 @@ service, both pipes, Aurora, and Kinesis. Stop the Python producers first. Proce
 terraform destroy
 ```
 
-**Verify:** destroy completes. If they used the EC2 but want to keep infra and only
-stop cost, `../scripts/generator_ec2.sh stop` powers it down instead.
+**Verify:** destroy completes. (The Kinesis stream sets `enforce_consumer_deletion =
+true`, so a lingering ClickPipes consumer won't block it.) If they used the EC2 but
+want to keep infra and only stop cost, `../scripts/generator_ec2.sh stop` powers it
+down instead.
 
 ---
 
@@ -466,13 +468,29 @@ First, in the SQL console: `CREATE DATABASE IF NOT EXISTS raw;`
 
 **Say to the user:** "I'll delete the AWS stack to stop charges. The **ClickPipes
 and ClickHouse service are not owned by CloudFormation** — you delete those in the
-console separately. Aurora and Kinesis delete with the stack. Proceed?"
+console separately. **Delete the Kinesis ClickPipe first** (it registers a consumer
+on the stream, and Kinesis won't delete a stream that still has consumers). Aurora
+and Kinesis then delete with the stack. Proceed?"
+
+**Need from the user:** confirm they've deleted the Kinesis (and Postgres) ClickPipe
+in the ClickHouse UI first.
 
 **Run (after an explicit "yes"):**
 
 ```bash
 aws cloudformation delete-stack --stack-name ch-aws-workshop
 aws cloudformation wait stack-delete-complete --stack-name ch-aws-workshop
+```
+
+**If it fails** with `DeleteStream can't delete ... because there are consumers
+associated`, the Kinesis pipe's consumer is still registered. Force it out and retry
+(CFN's `AWS::Kinesis::Stream` has no `EnforceConsumerDeletion` property, so this is
+manual):
+
+```bash
+aws kinesis delete-stream --stream-name <NamePrefix>-events \
+  --enforce-consumer-deletion --region <region>
+aws cloudformation delete-stack --stack-name ch-aws-workshop --region <region>
 ```
 
 **Then remind:** delete the ClickPipes and the ClickHouse Cloud service in the

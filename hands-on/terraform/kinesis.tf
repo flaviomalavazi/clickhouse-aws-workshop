@@ -21,6 +21,12 @@ resource "aws_kinesis_stream" "events" {
   shard_count = var.kinesis_stream_mode == "PROVISIONED" ? var.kinesis_shard_count : null
 
   retention_period = 24
+
+  # ClickPipes registers an enhanced fan-out CONSUMER on the stream, and Kinesis
+  # refuses to delete a stream that still has consumers. This forces their removal
+  # on `terraform destroy` so teardown doesn't get stuck if the Kinesis ClickPipe
+  # wasn't deleted first.
+  enforce_consumer_deletion = true
 }
 
 # Trust policy: allow the ClickHouse service IAM principal to assume this role.
