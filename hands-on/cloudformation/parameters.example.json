@@ -14,7 +14,7 @@
   { "ParameterKey": "ClickHouseIamPrincipalArn", "ParameterValue": "arn:aws:iam::000000000000:role/REPLACE_WITH_CH_SERVICE_PRINCIPAL" },
 
   { "ParameterKey": "KinesisStreamMode", "ParameterValue": "ON_DEMAND" },
-  { "ParameterKey": "KinesisShardCount", "ParameterValue": "2" },
+  { "ParameterKey": "KinesisShardCount", "ParameterValue": "1" },
 
   { "ParameterKey": "ClickPipesIngressCidrsOverride", "ParameterValue": "" },
   { "ParameterKey": "SeedIngressCidrs", "ParameterValue": "" },
@@ -22,7 +22,7 @@
   { "ParameterKey": "EnableGeneratorEc2", "ParameterValue": "false" },
   { "ParameterKey": "RepoUrl", "ParameterValue": "https://github.com/REPLACE_ORG/clickhouse-aws-workshop.git" },
   { "ParameterKey": "RepoBranch", "ParameterValue": "main" },
-  { "ParameterKey": "Ec2InstanceType", "ParameterValue": "t3.small" },
-  { "ParameterKey": "GeneratorCdcSleep", "ParameterValue": "1" },
-  { "ParameterKey": "GeneratorKinesisRate", "ParameterValue": "10" }
+  { "ParameterKey": "Ec2InstanceType", "ParameterValue": "t4g.micro" },
+  { "ParameterKey": "GeneratorCdcSleep", "ParameterValue": "0.1" },
+  { "ParameterKey": "GeneratorKinesisRate", "ParameterValue": "1000" }
 ]

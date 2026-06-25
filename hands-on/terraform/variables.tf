@@ -86,7 +86,7 @@ variable "aurora_engine_version" {
 }
 
 variable "aurora_instance_class" {
-  description = "Instance class for the Aurora writer. db.r6g.large is plenty for the workshop dataset."
+  description = "Instance class for the Aurora writer. db.t4g.medium is plenty for the workshop dataset."
   type        = string
   default     = "db.t4g.medium"
 }
@@ -157,7 +157,7 @@ variable "kinesis_stream_mode" {
 variable "kinesis_shard_count" {
   description = "Shard count when kinesis_stream_mode = PROVISIONED (ignored for ON_DEMAND)."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 ############################################
@@ -205,9 +205,9 @@ variable "repo_branch" {
 }
 
 variable "ec2_instance_type" {
-  description = "Instance type for the generator EC2. t3.small is plenty for the workshop generators."
+  description = "Instance type for the generator EC2. t4g.micro is plenty for the workshop generators."
   type        = string
-  default     = "t3.small"
+  default     = "t4g.micro"
 }
 
 variable "generator_cdc_sleep" {

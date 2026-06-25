@@ -58,6 +58,43 @@ resource "aws_rds_cluster_parameter_group" "aurora_pg" {
 }
 
 ############################################
+# Instance parameter group: CDC replication-safety GUCs
+############################################
+# These are INSTANCE-level params (NOT valid in the cluster group) and address the
+# ClickPipes "Review Postgres settings" checks for a CDC source:
+#   - max_slot_wal_keep_size bounds the WAL retained for a lagging replication slot
+#     so a stuck/paused pipe can't grow storage unbounded (was -1 = unlimited).
+#     Value in MB. Raise it if you pause the pipe for long stretches; too low risks
+#     the slot being invalidated, which forces ClickPipes to re-snapshot.
+#   - statement_timeout / idle_in_transaction_session_timeout cap long-running and
+#     idle-in-transaction sessions that otherwise hold back the catalog xmin and
+#     block replication. Value in ms (300000 = 5 min). All three are dynamic, so
+#     they apply without a reboot.
+resource "aws_db_parameter_group" "aurora_instance" {
+  name        = "${var.name_prefix}-instance"
+  family      = "aurora-postgresql17"
+  description = "Aurora PG instance params for ClickPipes CDC safety"
+
+  parameter {
+    name         = "max_slot_wal_keep_size"
+    value        = "2048" # MB (2 GiB)
+    apply_method = "immediate"
+  }
+
+  parameter {
+    name         = "statement_timeout"
+    value        = "300000" # ms (5 min)
+    apply_method = "immediate"
+  }
+
+  parameter {
+    name         = "idle_in_transaction_session_timeout"
+    value        = "300000" # ms (5 min)
+    apply_method = "immediate"
+  }
+}
+
+############################################
 # DB subnet group + security group
 ############################################
 
@@ -127,12 +164,13 @@ resource "aws_rds_cluster" "pg" {
 }
 
 resource "aws_rds_cluster_instance" "pg" {
-  identifier           = "${var.name_prefix}-aurora-pg-1"
-  cluster_identifier   = aws_rds_cluster.pg.id
-  engine               = aws_rds_cluster.pg.engine
-  engine_version       = aws_rds_cluster.pg.engine_version
-  instance_class       = var.aurora_instance_class
-  db_subnet_group_name = aws_db_subnet_group.aurora.name
+  identifier              = "${var.name_prefix}-aurora-pg-1"
+  cluster_identifier      = aws_rds_cluster.pg.id
+  engine                  = aws_rds_cluster.pg.engine
+  engine_version          = aws_rds_cluster.pg.engine_version
+  instance_class          = var.aurora_instance_class
+  db_subnet_group_name    = aws_db_subnet_group.aurora.name
+  db_parameter_group_name = aws_db_parameter_group.aurora_instance.name # CDC-safety GUCs
   # Kept public so the seed scripts can reach Aurora from your laptop. ClickPipes
   # itself connects privately over AWS PrivateLink (privatelink.tf) — the NLB +
   # VPC endpoint service front the writer's private IP, so no NAT IPs are needed.

@@ -123,7 +123,7 @@ Parameters:
 
   KinesisShardCount:
     Type: Number
-    Default: 2
+    Default: 1
     MinValue: 1
     Description: Shard count when KinesisStreamMode = PROVISIONED (ignored for ON_DEMAND).
 
@@ -165,7 +165,7 @@ Parameters:
 
   Ec2InstanceType:
     Type: String
-    Default: t3.small
+    Default: t4g.micro
     Description: Instance type for the generator EC2.
 
   GeneratorCdcSleep:
@@ -243,6 +243,26 @@ Resources:
       Parameters:
         rds.logical_replication: "1"
         wal_sender_timeout: "0"
+
+  # Instance parameter group: CDC replication-safety GUCs. These are INSTANCE-level
+  # params (NOT valid in the cluster group above) and address the ClickPipes "Review
+  # Postgres settings" checks for a CDC source:
+  #   - max_slot_wal_keep_size bounds WAL kept for a lagging replication slot so a
+  #     stuck/paused pipe can't grow storage unbounded (was -1 = unlimited). MB.
+  #     Too low risks slot invalidation -> ClickPipes re-snapshots; raise if you
+  #     pause the pipe for long stretches.
+  #   - statement_timeout / idle_in_transaction_session_timeout cap long-running and
+  #     idle-in-transaction sessions that block replication. ms (300000 = 5 min).
+  # All three are dynamic, so they apply without a reboot.
+  AuroraDbParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: !Sub "${NamePrefix} Aurora instance params for ClickPipes CDC safety"
+      Family: aurora-postgresql17
+      Parameters:
+        max_slot_wal_keep_size: "2048"                 # MB (2 GiB)
+        statement_timeout: "300000"                    # ms (5 min)
+        idle_in_transaction_session_timeout: "300000"  # ms (5 min)
 
   AuroraDbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -356,6 +376,7 @@ Resources:
       DBInstanceIdentifier: !Sub "${NamePrefix}-aurora-pg-1"
       DBInstanceClass: !Ref AuroraInstanceClass
       DBSubnetGroupName: !Ref AuroraDbSubnetGroup
+      DBParameterGroupName: !Ref AuroraDbParameterGroup   # CDC-safety GUCs
       # Public so the seed scripts (and ClickPipes' static IPs) reach Aurora over
       # the public endpoint. This is the static-IP path's analogue of Terraform's
       # publicly_accessible = true.

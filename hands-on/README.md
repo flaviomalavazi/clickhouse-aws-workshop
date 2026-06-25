@@ -1,6 +1,6 @@
 # ClickHouse + AWS Workshop — Hands-on
 
-> **Workshop:** [top-level README](../README.md) · **also in this folder:** [Terraform](terraform/README.md) · [CloudFormation](cloudformation/README.md) · [Generators & migrations](mock_data/README.md) · [Generator EC2](EC2_GENERATOR.md) · [Agentic stack](agentic-data-stack/README.md) · [Langfuse](langfuse/README.md)
+> **Workshop:** [top-level README](../README.md) · [agent-guided walkthrough](../AGENT_GUIDE.md) · **also in this folder:** [Terraform](terraform/README.md) · [CloudFormation](cloudformation/README.md) · [Generators & migrations](mock_data/README.md) · [Generator EC2](EC2_GENERATOR.md) · [Agentic stack](agentic-data-stack/README.md) · [Langfuse](langfuse/README.md)
 
 End-to-end lab environment for the ClickHouse + AWS workshop. You provision a
 **ClickHouse Cloud** service with Terraform, ingest from **Aurora PostgreSQL

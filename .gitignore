@@ -1,6 +1,7 @@
 # Secrets / local config
 .env
 terraform/terraform.tfvars
+*parameters.json
 *.auto.tfvars
 *.DS_Store
 *.vscode/

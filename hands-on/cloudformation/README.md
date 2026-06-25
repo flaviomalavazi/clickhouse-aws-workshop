@@ -1,11 +1,16 @@
 # CloudFormation — the AWS half, without Terraform
 
-> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · source of truth: [Terraform](../terraform/README.md) · related: [Generator EC2](../EC2_GENERATOR.md)
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · source of truth: [Terraform](../terraform/README.md) · related: [Generator EC2](../EC2_GENERATOR.md) · agent-guided: [AGENT_GUIDE.md](../../AGENT_GUIDE.md)
 
 A single, self-contained CloudFormation template that builds the **same AWS
 resources** as the Terraform stack, for attendees who can't or won't use
 Terraform. **Terraform (`../terraform/`) remains the source of truth**; this
 template mirrors its AWS half.
+
+> **Want an AI to walk you through it?** Hand your agent (e.g. Claude Code)
+> [AGENT_GUIDE.md](../../AGENT_GUIDE.md) — an interactive, pair-programming runbook where
+> the agent explains each action, asks before running it, and has you fill in your
+> own secrets. This README is the reference; that guide is the guided walkthrough.
 
 ## What's the same, what's different
 
@@ -65,6 +70,14 @@ cloudformation/
 - A **ClickHouse Cloud service** created **first** — you need its IAM principal ARN
   for the Kinesis role trust (step 1 below).
 
+## Manual ClickHouse Service creation
+
+CloudFormation will be built on the AWS side but it needs the ClickHouse Service's IAM role:
+
+1. **Create the ClickHouse Cloud service** in the console (do this _before_ deploy
+   — or before re-deploying with the principal). Copy its **IAM principal ARN**
+   ("Service role ID (IAM)") and pass it as `ClickHouseIamPrincipalArn`.
+
 ## Parameters to fill in
 
 Copy `parameters.example.json` to `parameters.json` and edit it. Every parameter
@@ -78,6 +91,8 @@ console). These are the ones you must set:
 | `AuroraMasterPassword` | A strong Aurora admin password | 8+ chars; avoid `/ @ "` and spaces (RDS rule). Hidden (`NoEcho`) |
 | `ClickpipesUserPassword` | A strong password for the `clickpipes_user` role | You re-enter this in the ClickPipes UI (step 3). Hidden (`NoEcho`) |
 | `ClickHouseIamPrincipalArn` | Your ClickHouse service's **IAM principal ARN** | From the Cloud console ("Service role ID (IAM)"). Needed for the Kinesis pipe — see step 1 |
+| `EnableGeneratorEc2` | `true` | you want an in-VPC EC2 to seed + run the generators for you |
+| `RepoUrl` | [https://github.com/flaviomalavazi/clickhouse-aws-workshop](https://github.com/flaviomalavazi/clickhouse-aws-workshop) | **required when `EnableGeneratorEc2=true`** — the public git URL of this repo |
 
 Everything else has a working default — leave it unless you have a reason to change it:
 
@@ -89,15 +104,13 @@ Everything else has a working default — leave it unless you have a reason to c
 | `AuroraDatabaseName` | `appdb` | you want a different DB name |
 | `AuroraMasterUsername` | `postgres` | you want a different admin user |
 | `KinesisStreamMode` | `ON_DEMAND` | you prefer `PROVISIONED` capacity |
-| `KinesisShardCount` | `2` | only used when `KinesisStreamMode=PROVISIONED` |
+| `KinesisShardCount` | `1` | only used when `KinesisStreamMode=PROVISIONED` |
 | `ClickPipesIngressCidrsOverride` | _(empty)_ | **you deploy outside `us-east-1`** — set this region's ClickPipes static `/32`s (see below) |
 | `SeedIngressCidrs` | _(empty)_ | you seed Aurora **from your laptop** — set your `<ip>/32` |
-| `EnableGeneratorEc2` | `false` | you want an in-VPC EC2 to seed + run the generators for you |
-| `RepoUrl` | _(empty)_ | **required when `EnableGeneratorEc2=true`** — the public git URL of this repo |
 | `RepoBranch` | `main` | the EC2 should check out a different branch |
-| `Ec2InstanceType` | `t3.small` | you want a different generator instance size |
-| `GeneratorCdcSleep` | `1` | you want faster/slower simulated CDC mutations (seconds) |
-| `GeneratorKinesisRate` | `10` | you want a different Kinesis events/sec rate |
+| `Ec2InstanceType` | `t4g.micro` | you want a different generator instance size |
+| `GeneratorCdcSleep` | `0.1` | you want faster/slower simulated CDC mutations (seconds) |
+| `GeneratorKinesisRate` | `1000` | you want a different Kinesis events/sec rate |
 | `Al2023Ami` | AL2023 SSM alias | leave it — resolves the latest AL2023 AMI at deploy time |
 
 ## Region & the static-IP Mapping
@@ -194,16 +207,13 @@ flow:
 > it unset and uses SSM). Same script, both paths. Secrets Manager has a small
 > per-secret monthly cost.
 
-## Manual ClickHouse + ClickPipes steps
+## Manual ClickHouse Service creation + ClickPipes steps
 
-CloudFormation built the AWS side; create the ClickHouse side by hand:
+After we've built the AWS components, we can proceed with the data ingestion:
 
-1. **Create the ClickHouse Cloud service** in the console (do this _before_ deploy
-   — or before re-deploying with the principal). Copy its **IAM principal ARN**
-   ("Service role ID (IAM)") and pass it as `ClickHouseIamPrincipalArn`.
-2. **Create the ClickPipes' target database** in ClickHouse (the workshop uses
+1. **Create the ClickPipes' target database** in ClickHouse (the workshop uses
    `raw`): `CREATE DATABASE IF NOT EXISTS raw;`.
-3. **Postgres CDC pipe** (ClickPipes UI → _Postgres CDC_) — full walkthrough:
+2. **Postgres CDC pipe** (ClickPipes UI → _Postgres CDC_) — full walkthrough:
    <https://clickhouse.com/docs/integrations/clickpipes/postgres>
    - **Host** = `AuroraWriterEndpoint` output, **Port** `5432`, **Database** =
      `AuroraDatabaseName`. (Connect to the **writer** — logical replication only
@@ -214,13 +224,13 @@ CloudFormation built the AWS side; create the ClickHouse side by hand:
      both **ReplacingMergeTree**, destination database `raw`.
    - The Aurora SG already allow-lists the ClickPipes static IPs, so it connects
      over the public endpoint (no PrivateLink).
-4. **Kinesis pipe** (ClickPipes UI → _Kinesis_):
+3. **Kinesis pipe** (ClickPipes UI → _Kinesis_):
    - **Stream** = `KinesisStreamName` output, **region** = your deploy region.
    - Auth **IAM role**, role ARN = `ClickPipesKinesisRoleArn` output.
    - Format `JSONEachRow`, destination `raw.events_raw`. Match the columns
      produced by `kinesis_producer.py` (see `../terraform/clickpipes.tf` for the
      exact column list/types).
-5. **Model + query** in the SQL console: run
+4. **Model + query** in the SQL console: run
    `../sql/clickhouse/01_materialized_views.sql` then `02_demo_queries.sql`.
 
 ## Teardown
@@ -241,6 +251,16 @@ Manager secrets are deleted with a recovery window.
 - **Ordering** — the ClickHouse service must exist _before_ deploy (its IAM
   principal feeds the Kinesis role trust); the `ClickPipesKinesisRoleArn` output is
   needed _after_ to create the Kinesis pipe.
+- **Postgres CDC settings** (`AuroraDbParameterGroup`): an _instance_ parameter
+  group sets the replication-safety GUCs ClickPipes' "Review Postgres settings" step
+  flags — `max_slot_wal_keep_size = 2048` MB (bounds the WAL kept for a lagging slot;
+  default `-1` is unlimited), plus `statement_timeout` and
+  `idle_in_transaction_session_timeout = 300000` ms (5 min) to cap sessions that hold
+  back the xmin horizon and block replication. **Tradeoff:** too-low
+  `max_slot_wal_keep_size` lets a long pipe pause invalidate the slot (forcing a
+  re-snapshot) — raise it if you pause for long stretches. `../sql/aurora/01_setup.sql`
+  also pins the two timeouts on the database as a fallback. (These are instance-level,
+  not cluster-level, parameters.)
 - **Not auto-synced with Terraform** — two stacks to keep in step. Terraform is the
   source of truth; this template mirrors its AWS half, with the intended
   PrivateLink → static-IP difference called out above.

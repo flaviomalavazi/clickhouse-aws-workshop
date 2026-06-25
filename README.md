@@ -16,8 +16,14 @@ Materials for the workshop with the AWS Solutions Architecture team: the theory
 prerequisites, architecture, phased run order, and teardown. The other guides go
 deeper on a specific piece:
 
+> **Want an AI to run it with you?** [`AGENT_GUIDE.md`](AGENT_GUIDE.md) is an
+> interactive, pair-programming runbook for an agent (e.g. Claude Code): it lets you
+> pick the **Terraform or CloudFormation** path, explains each action, asks before
+> running it, and has you fill in your own secrets.
+
 | Guide | What it covers | Read it when… |
 |-------|----------------|----------------|
+| [AGENT_GUIDE.md](AGENT_GUIDE.md) | Agent-guided, interactive walkthrough of the **whole workshop** — pick Terraform or CloudFormation; the agent explains and runs each step with your approval, you supply the secrets. | …you want an AI to pair with you through the labs. |
 | [hands-on/README.md](hands-on/README.md) | The whole lab end-to-end: prerequisites, architecture diagram, the two-phase `terraform apply`, modeling in ClickHouse, teardown. | …you're setting up the workshop or want the big picture. **Start here.** |
 | [hands-on/terraform/README.md](hands-on/terraform/README.md) | The infrastructure (**source of truth**): ClickHouse Cloud service, Aurora (CDC source), Kinesis, both ClickPipes, **PrivateLink**, and the optional **generator EC2**. Providers, two-phase apply, gotchas. | …you're applying/editing Terraform or debugging the infra. |
 | [hands-on/cloudformation/README.md](hands-on/cloudformation/README.md) | The **no-Terraform** alternative: a CloudFormation template for the **AWS half** (Aurora + Kinesis + ClickPipes IAM role + optional generator EC2), using ClickPipes **static-IP allow-listing** instead of PrivateLink. ClickHouse service + ClickPipes created manually. | …you can't/won't use Terraform but want the AWS infra. |

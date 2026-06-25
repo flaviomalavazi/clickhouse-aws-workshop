@@ -18,6 +18,34 @@
 SHOW rds.logical_replication;
 
 -- ---------------------------------------------------------------------------
+-- 0b. CDC replication-safety defaults (the ClickPipes "Review Postgres settings"
+--     checks). The instance parameter group already sets these cluster-wide
+--     (terraform aws_db_parameter_group.aurora_instance / CFN AuroraDbParameterGroup),
+--     which is what ClickPipes reads. We ALSO pin the two timeouts on THIS database
+--     as a version-controlled default, so a CDC source created without that
+--     parameter group is still safe. They cap long-running / idle-in-transaction
+--     sessions that hold back the catalog xmin and block logical replication;
+--     5 min is generous for the workshop seed + initial snapshot. (ALTER DATABASE
+--     SET applies to NEW sessions, so it won't time out this migration.)
+--
+--     NOTE: max_slot_wal_keep_size (bounds WAL kept for a lagging slot) is a
+--     system-wide GUC and can ONLY be set in the instance parameter group, not
+--     per-database — see the IaC. Default -1 (unlimited) is the unsafe value.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+   EXECUTE format('ALTER DATABASE %I SET statement_timeout = %L', current_database(), '5min');
+   EXECUTE format('ALTER DATABASE %I SET idle_in_transaction_session_timeout = %L', current_database(), '5min');
+END
+$$;
+
+-- Verify the safety settings (these reflect the instance parameter group; the
+-- ALTER DATABASE above takes effect for sessions opened after this migration).
+SHOW max_slot_wal_keep_size;
+SHOW statement_timeout;
+SHOW idle_in_transaction_session_timeout;
+
+-- ---------------------------------------------------------------------------
 -- 1. OLTP schema — a tiny e-commerce model for the fictional company "DataStream"
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS customers (

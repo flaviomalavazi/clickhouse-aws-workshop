@@ -1,12 +1,18 @@
 # Terraform — ClickHouse Cloud + AWS ingestion
 
-> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · related: [Generator EC2](../EC2_GENERATOR.md) · no Terraform? [CloudFormation alternative](../cloudformation/README.md)
+> [← Hands-on guide](../README.md) · [Workshop README](../../README.md) · related: [Generator EC2](../EC2_GENERATOR.md) · no Terraform? [CloudFormation alternative](../cloudformation/README.md) · agent-guided: [AGENT_GUIDE.md](../../AGENT_GUIDE.md)
 
 **This is the source of truth.** A [CloudFormation template](../cloudformation/README.md)
 mirrors the **AWS half** of this stack for attendees who can't use Terraform. It
 omits the ClickHouse-provider resources (service + ClickPipes) and swaps the
 PrivateLink path for ClickPipes **static-IP allow-listing**. Keep the two in step;
 edit Terraform first.
+
+> **Want an AI to walk you through it?** Hand your agent (e.g. Claude Code) the
+> workshop's [AGENT_GUIDE.md](../../AGENT_GUIDE.md) — an interactive, pair-programming
+> runbook covering **both** the Terraform and CloudFormation paths, where the agent
+> explains each action, asks before running it, and has you fill in your own secrets.
+> This README is the Terraform reference; that guide is the guided walkthrough.
 
 Provisions, in one stack:
 
@@ -59,6 +65,16 @@ it between demos with `../scripts/generator_ec2.sh {start|stop|status}`.
   tiers). If your org is on legacy tiers, add `tier = "production"`.
 - **Logical replication** (`rds.logical_replication = 1`) is a *static* Aurora
   parameter — the cluster reboots once when the parameter group is attached.
+- **Postgres CDC settings** (`aws_db_parameter_group.aurora_instance`): an
+  *instance* parameter group sets the replication-safety GUCs ClickPipes' "Review
+  Postgres settings" step flags — `max_slot_wal_keep_size = 2048` MB (bounds the
+  WAL kept for a lagging slot; default `-1` is unlimited), plus `statement_timeout`
+  and `idle_in_transaction_session_timeout = 300000` ms (5 min) to cap sessions
+  that hold back the xmin horizon and block replication. **Tradeoff:** too-low
+  `max_slot_wal_keep_size` lets a long pipe pause invalidate the slot (forcing a
+  re-snapshot) — raise it if you pause for long stretches. `sql/aurora/01_setup.sql`
+  also pins the two timeouts on the database as a fallback. (These are
+  instance-level, not cluster-level, parameters.)
 - **Postgres pipe uses PrivateLink** (`privatelink.tf`): an internal NLB fronts
   the Aurora writer's private IP, exposed via a VPC endpoint service that's
   allow-listed to the ClickPipes account (`var.clickpipes_account_id`,

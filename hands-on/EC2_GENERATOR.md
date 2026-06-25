@@ -36,7 +36,7 @@ home network.
 Defined in [terraform/ec2.tf](terraform/ec2.tf), gated behind `enable_generator_ec2`
 (default `false`). When enabled it creates:
 
-- An **EC2 instance** (`${name_prefix}-generator`, Amazon Linux 2023, `t3.small` by
+- An **EC2 instance** (`${name_prefix}-generator`, Amazon Linux 2023, `t4g.micro` by
   default) in the Aurora VPC, in a public subnet with a public IP for outbound only.
 - An **egress-only security group** — no inbound ports at all (Session Manager needs none).
 - An **IAM role / instance profile** with:
@@ -118,6 +118,57 @@ sudo env $(grep -v '^#' /etc/ch-workshop-runtime.env | xargs) /usr/local/bin/uv 
 Kinesis side: check the stream's `IncomingRecords` metric in CloudWatch, or the
 ClickHouse `raw.*` tables once the ClickPipes are enabled.
 
+## Verifying the seed (and retrying if it failed)
+
+1. **Connect** to the instance over Session Manager:
+
+   ```bash
+   # Terraform:
+   eval "$(terraform output -raw generator_ec2_ssm_command)"
+   # CloudFormation: use the GeneratorSsmCommand stack output, e.g.
+   #   aws ssm start-session --target <instance-id> --region <region>
+   sudo -i
+   ```
+
+2. **Check whether the seed succeeded.** The bootstrap writes
+   `/opt/ch-workshop/.seeded` *only after* both the migrations and the seed complete,
+   and prints a final success line to the cloud-init log:
+
+   ```bash
+   ls -l /opt/ch-workshop/.seeded                          # present ⇒ seed completed
+   grep -n "Bootstrap complete" /var/log/cloud-init-output.log
+
+   # confirm rows actually landed (same env the service uses):
+   cd /opt/ch-workshop/hands-on
+   sudo env $(grep -v '^#' /etc/ch-workshop-runtime.env | xargs) /usr/local/bin/uv run \
+     python -c "import db; c=db.connect_with_retry(); print('orders:', c.execute('select count(*) from orders').fetchone())"
+   ```
+
+   **Healthy** = `.seeded` exists, the *"Bootstrap complete"* line is present, and the
+   row count is non-zero. If `.seeded` is missing or the count is zero, the seed
+   failed — see the end of `/var/log/cloud-init-output.log` for the error, then retry.
+
+3. **Retry the seed + generators.** When the seed failed, `.seeded` was never written,
+   so simply re-running the (idempotent) bootstrap re-applies migrations, re-seeds, and
+   (re)starts the `ch-generators` service — it re-fetches the DB passwords itself:
+
+   ```bash
+   sudo bash /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh
+   ```
+
+   If `.seeded` *exists* but the data is partial/wrong, clear the guard first, then
+   re-run — ⚠️ `seed_rds.py` is **not** idempotent (that guard prevents double-inserts),
+   so truncate the Aurora tables first or expect duplicates:
+
+   ```bash
+   sudo systemctl stop ch-generators
+   sudo rm -f /opt/ch-workshop/.seeded
+   sudo bash /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh
+   ```
+
+   Re-check with the commands in step 2, and watch the generators come up with
+   `journalctl -u ch-generators -f`.
+
 ## Managing the service
 
 ```bash
@@ -141,7 +192,7 @@ sudo bash "/opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh"
 
 ## Teardown / cost
 
-The instance runs ~24/7 (a `t3.small`). Between demos, **stop** it instead of
+The instance runs ~24/7 (a `t4g.micro`). Between demos, **stop** it instead of
 destroying — you keep only the small EBS charge, and on start the generators
 auto-resume (the service is `enabled`):
 
