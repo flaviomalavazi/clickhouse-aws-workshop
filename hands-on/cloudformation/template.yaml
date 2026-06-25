@@ -170,12 +170,12 @@ Parameters:
 
   GeneratorCdcSleep:
     Type: Number
-    Default: 1
+    Default: 0.1
     Description: Seconds between simulated CDC mutations on the generator EC2 (run_generators.py --cdc-sleep).
 
   GeneratorKinesisRate:
     Type: Number
-    Default: 10
+    Default: 1000
     Description: Kinesis events per second produced by the generator EC2 (run_generators.py --kinesis-rate).
 
   Al2023Ami:

@@ -213,11 +213,11 @@ variable "ec2_instance_type" {
 variable "generator_cdc_sleep" {
   description = "Seconds between simulated CDC mutations on the generator EC2 (passed to run_generators.py --cdc-sleep)."
   type        = number
-  default     = 1.0
+  default     = 0.1
 }
 
 variable "generator_kinesis_rate" {
   description = "Kinesis events per second produced by the generator EC2 (passed to run_generators.py --kinesis-rate)."
   type        = number
-  default     = 10
+  default     = 1000
 }

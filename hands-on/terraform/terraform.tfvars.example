@@ -32,3 +32,5 @@ clickpipes_ingress_cidrs = [
 enable_postgres_clickpipe = false
 enable_kinesis_clickpipe  = false
 enable_generator_ec2      = false
+generator_cdc_sleep       = 0.1
+generator_kinesis_rate    = 1000
