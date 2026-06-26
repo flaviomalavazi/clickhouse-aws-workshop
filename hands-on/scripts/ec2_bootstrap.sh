@@ -57,13 +57,19 @@ else:
     sys.exit(f"Unknown SECRETS_SOURCE={source!r} (expected 'ssm' or 'secretsmanager')")
 PY
 }
+# Disable xtrace around all secret handling so the passwords are never echoed
+# into the boot log / SSM command output (bash -x would print resolved values).
+{ set +x; } 2>/dev/null
 PG_PASSWORD="$(read_secret "$SSM_PG_PASSWORD")"
 CLICKPIPES_PASSWORD="$(read_secret "$SSM_CLICKPIPES_PASSWORD")"
+set -x
 
 # 4. Export the connection env. Double-quoting a variable does NOT re-expand '$'
 #    inside its value, so passwords with '$' survive intact.
 export PGHOST="$PG_HOST" PGPORT=5432 PGDATABASE="$PG_DATABASE" PGUSER="$PG_USER"
+{ set +x; } 2>/dev/null  # secret values below — keep them out of the trace
 export PGPASSWORD="$PG_PASSWORD" CLICKPIPES_USER_PASSWORD="$CLICKPIPES_PASSWORD"
+set -x
 export PGSSLMODE=verify-full
 # AWS_REGION and KINESIS_STREAM_NAME were exported from /etc/ch-workshop.env above.
 
@@ -85,6 +91,7 @@ fi
 #    systemd reads EnvironmentFile values literally too (no '$' interpolation),
 #    so secrets are safe here as well. Root-only.
 umask 077
+{ set +x; } 2>/dev/null  # the printf block below writes the secret values
 {
   printf 'PGHOST=%s\n' "$PG_HOST"
   printf 'PGPORT=5432\n'
@@ -96,6 +103,7 @@ umask 077
   printf 'AWS_REGION=%s\n' "$AWS_REGION"
   printf 'KINESIS_STREAM_NAME=%s\n' "$KINESIS_STREAM_NAME"
 } > /etc/ch-workshop-runtime.env
+set -x
 umask 022
 
 # 8. Install + (re)start the always-on generators service. CDC_SLEEP/KINESIS_RATE
