@@ -211,6 +211,20 @@ flow:
 
 After we've built the AWS components, we can proceed with the data ingestion:
 
+> [!IMPORTANT]
+> **Naming contract — use these exact destination names.** You name the databases
+> and tables by hand here, and the SQL in `../sql/clickhouse/` references them
+> verbatim. Get a name wrong and the modeling and demo queries fail (or silently
+> return nothing).
+>
+> | Source | Destination DB | Destination table | Engine |
+> | --- | --- | --- | --- |
+> | Postgres `public.customers` | `raw` | `customers` | ReplacingMergeTree |
+> | Postgres `public.orders` | `raw` | `orders` | ReplacingMergeTree |
+> | Kinesis stream | `raw` | `events_raw` | MergeTree |
+>
+> The modeling SQL then creates the `marts` database for the derived views.
+
 1. **Create the ClickPipes' target database** in ClickHouse (the workshop uses
    `raw`): `CREATE DATABASE IF NOT EXISTS raw;`.
 2. **Postgres CDC pipe** (ClickPipes UI → _Postgres CDC_) — full walkthrough:

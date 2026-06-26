@@ -128,6 +128,22 @@ cd ../terraform
 terraform apply
 ```
 
+> [!IMPORTANT]
+> **Naming contract — match these destination names exactly when creating the
+> ClickPipes.** Every query in `sql/clickhouse/` references these tables by name,
+> so a different database or table name makes the modeling and demo queries fail
+> (or silently return nothing).
+>
+> | Source | Destination DB | Destination table | Engine |
+> | --- | --- | --- | --- |
+> | Postgres `public.customers` | `raw` | `customers` | ReplacingMergeTree |
+> | Postgres `public.orders` | `raw` | `orders` | ReplacingMergeTree |
+> | Kinesis stream | `raw` | `events_raw` | MergeTree |
+>
+> Terraform (Phase 2b) sets these for you in `terraform/clickpipes.tf`. If you
+> create the pipes by hand (CloudFormation path), match them exactly. The modeling
+> SQL then creates the `marts` database for the derived views.
+
 ### Phase 3 — model + query in ClickHouse
 ```bash
 # In the ClickHouse Cloud SQL console:

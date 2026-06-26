@@ -49,6 +49,24 @@ be handed to an agent — tell your agent *"follow `AGENT_GUIDE.md`"*.
    Terraform, the ClickHouse org) before creating anything. The workshop creates
    **billable** resources.
 
+> [!IMPORTANT]
+> **Naming contract — the ClickPipes destination names are not free choices.** The
+> modeling and demo SQL in `hands-on/sql/clickhouse/` references these tables by
+> name. If a pipe writes to a different database or table, every query in
+> `01_materialized_views.sql` and `02_demo_queries.sql` fails (or silently returns
+> nothing). When you (or the user) create the pipes, the destinations **must** be:
+>
+> | Source | Destination DB | Destination table | Engine |
+> | --- | --- | --- | --- |
+> | Postgres `public.customers` | `raw` | `customers` | ReplacingMergeTree |
+> | Postgres `public.orders` | `raw` | `orders` | ReplacingMergeTree |
+> | Kinesis stream | `raw` | `events_raw` | MergeTree |
+>
+> Track T (Terraform) sets these for you in `hands-on/terraform/clickpipes.tf`. On
+> Track C (manual/CloudFormation UI), relay these exact names to the user and have
+> them confirm each pipe's destination matches before moving on. The modeling SQL
+> then creates the `marts` database for derived views — don't pre-create it differently.
+
 ### The shape of every step
 
 Each phase below gives you:
