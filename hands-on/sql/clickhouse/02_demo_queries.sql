@@ -43,6 +43,13 @@ FROM marts.orders_current
 GROUP BY status
 ORDER BY gmv DESC;
 
+-- RMV state of orders (1h refresh configured schedule)
+-- Compare the execution time and memory usage to the query above (the RMV is a pre-filtered snapshot of the same data)
+SELECT status, count() AS orders, round(sum(amount), 2) AS gmv
+FROM marts.orders_current_rmv
+GROUP BY status
+ORDER BY gmv DESC;
+
 -- Show CDC freshness: the most recently synced rows
 SELECT id, customer_id, status, amount, updated_at, _peerdb_synced_at
 FROM raw.orders FINAL

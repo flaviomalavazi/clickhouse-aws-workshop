@@ -68,3 +68,20 @@ CREATE VIEW IF NOT EXISTS marts.orders_current AS
 SELECT *
 FROM raw.orders FINAL
 WHERE _peerdb_is_deleted = 0;
+
+-- Creating a refreshable materialized view (RMV) on top of the CDC table.
+-- This is optional, but it allows you to pre-filter the CDC data at a regular interval (e.g., every hour) 
+-- and store it in a separate table for faster querying.
+CREATE TABLE marts.orders_current_rmv AS raw.orders;
+
+CREATE MATERIALIZED VIEW final_orders_table
+REFRESH EVERY 1 HOUR TO marts.orders_current_rmv AS
+SELECT *
+FROM raw.orders FINAL
+WHERE _peerdb_is_deleted = 0;
+
+-- Checking the latest run for each Refreshable Materialized View (RMV) in the system.view_refreshes table
+SELECT database, view, status,
+       last_success_time, last_refresh_time, next_refresh_time,
+       read_rows, written_rows
+FROM system.view_refreshes;
