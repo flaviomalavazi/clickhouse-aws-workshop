@@ -180,7 +180,7 @@ Parameters:
 
   Al2023Ami:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
     Description: >-
       AL2023 AMI, resolved from the public SSM alias at deploy time (ships the SSM
       agent for Session Manager). Leave the default.
@@ -528,6 +528,13 @@ Resources:
   GeneratorInstance:
     Type: AWS::EC2::Instance
     Condition: EnableEc2
+    # CFN only infers ordering from Ref/GetAtt, and the user_data references the
+    # cluster ENDPOINT — which exists before the DB instance is accepting
+    # connections (and before the logical-replication reboot). Without this, the
+    # EC2 first-boot runs migrations against an Aurora that isn't ready yet and
+    # dies with "server closed the connection unexpectedly". Wait for the writer
+    # instance to reach CREATE_COMPLETE (available) before launching the generator.
+    DependsOn: AuroraInstance
     Properties:
       ImageId: !Ref Al2023Ami
       InstanceType: !Ref Ec2InstanceType
