@@ -107,15 +107,21 @@ finish with the **[Shared procedures](#shared-procedures)**.
 # Track T — Terraform
 
 Terraform provisions everything in one place: the ClickHouse Cloud service, Aurora,
-Kinesis, the IAM role, PrivateLink, and (optionally) the generator EC2 — and creates
-the ClickPipes in a second apply. Reference:
+Kinesis, the IAM role, PrivateLink, the generator EC2, **and** the ClickPipes.
+**By default this is now a single `terraform apply`** — the generator EC2 seeds
+Aurora, Terraform waits for that to finish, creates the `raw` database, and then
+creates both pipes, all in one run. The two-phase flow is still available as an
+opt-out (see T2). Reference:
 [hands-on/terraform/README.md](hands-on/terraform/README.md).
 
 ## T0 — Prerequisites & environment check
 
 **Say to the user:** "I'll check your tools and credentials — all read-only. For
 Terraform we need: Terraform ≥ 1.11, the AWS CLI authenticated, and a ClickHouse
-Cloud **API key** (org id + key id + secret)."
+Cloud **API key** (org id + key id + secret). The single-apply also runs two local
+provisioners during `apply`, so this machine needs **`curl`** (to create the `raw`
+database) and the **AWS CLI** (to poll the EC2 seed over SSM) — both usually already
+present."
 
 **Run (after approval):**
 
@@ -159,9 +165,11 @@ cp -n terraform.tfvars.example terraform.tfvars
 
 You may set the **non-secret** choices they make: `aws_region`,
 `clickhouse_region`, `name_prefix`, and (optionally) `clickpipes_ingress_cidrs`
-(their `<ip>/32` for laptop seeding). Leave `enable_postgres_clickpipe` and
-`enable_kinesis_clickpipe` **false** for now (two-phase apply). Mention the
-generator EC2 toggle (`enable_generator_ec2` + `repo_url`) as an option.
+(their `<ip>/32`, only needed for laptop seeding). **Leave the toggles at their
+new defaults** — `enable_postgres_clickpipe`, `enable_kinesis_clickpipe`, and
+`enable_generator_ec2` all default `true`, and `repo_url` defaults to the canonical
+repo (override it if they use a fork). Don't change these yet; the deployment mode
+is decided in **T2**. The defaults give a single-apply, end-to-end deploy.
 
 **Verify (without printing secrets):**
 
@@ -175,7 +183,35 @@ grep -E 'clickhouse_organization_id|token_key|token_secret' terraform.tfvars | \
 
 **If it fails:** placeholders remain → ask the user to finish filling them.
 
-## T2 — Initialize Terraform
+## T2 — Choose the deployment mode
+
+**Say to the user:** "Terraform now defaults to a **single apply** that brings up
+*everything*: the ClickHouse service, Aurora, Kinesis, IAM, PrivateLink, and the
+generator EC2 — then it **waits for the EC2 to seed Aurora**, creates the `raw`
+database, and finally creates **both ClickPipes**. One `terraform apply`, no manual
+SQL, no second run. It just takes longer (~15–25 min) because the apply blocks while
+Aurora boots and the EC2 finishes bootstrapping and seeding."
+
+**Ask the user to choose (and confirm before proceeding):**
+
+- **Single apply (default, recommended):** everything in one `terraform apply`.
+- **Two-phase apply:** stand up infra first, seed, then a second apply for the
+  pipes — useful if they want to inspect each stage, or seed from their laptop
+  instead of the EC2.
+
+**Must explain regardless of their choice:** the **Postgres CDC pipe cannot be
+created until Aurora has been seeded** — specifically until the `clickpipes_pub`
+publication and the `clickpipes_user` role exist, which the generator EC2 creates
+during its bootstrap (migrations). In **single apply** this ordering is *automatic*:
+Terraform polls the EC2's `/opt/ch-workshop/.seeded` marker and only creates the
+Postgres pipe once seeding is done. In **two-phase**, **the ordering is theirs to
+enforce** — they must seed before the pipe apply. (The Kinesis pipe has no such
+dependency; it only needs the stream + the `raw` database.)
+
+- Single apply → **T3**, then **T4 (single apply)**.
+- Two-phase → **T3**, then **T4 (two-phase)**.
+
+## T3 — Initialize Terraform
 
 **Say to the user:** "This downloads the AWS and ClickHouse providers. Safe,
 read-only on your infra."
@@ -183,37 +219,90 @@ read-only on your infra."
 **Run (after approval):**
 
 ```bash
+cd hands-on/terraform
 terraform init
 ```
 
 **Verify:** "Terraform has been successfully initialized."
 
-## T3 — Apply phase 1 (infrastructure, pipes off) — HARD GATE
+## T4 — Apply — HARD GATE
 
-**Say to the user:** "This creates **real, billable** resources: the ClickHouse
-Cloud service, Aurora PostgreSQL, Kinesis, IAM, and PrivateLink. The ClickPipes are
-**not** created yet (their flags are false) — we turn them on after seeding. I'll
-show you the plan first. Proceed?"
+Follow the path the user chose in T2.
+
+### T4 (single apply) — the default
+
+**Say to the user:** "This creates **real, billable** resources and runs to the end
+in one go: the ClickHouse service, Aurora, Kinesis, IAM, PrivateLink, the generator
+EC2 (which seeds Aurora), then — after Terraform waits for that seed — the `raw`
+database and **both ClickPipes**. Expect **~15–25 min**: Aurora reboots once
+(logical replication is a static parameter) and the apply *blocks* at
+`terraform_data.wait_for_seed` while the EC2 bootstraps and seeds. I'll show you the
+plan first. Proceed?"
 
 **Run (after approval):**
 
 ```bash
 terraform plan        # review together first
-terraform apply       # type yes — or I can run `apply -auto-approve` only if you tell me to
+terraform apply       # type yes at Terraform's own prompt
 ```
 
-Prefer letting Terraform's own `yes` prompt be the final confirmation. Don't use
-`-auto-approve` unless the user explicitly says so.
+Don't use `-auto-approve` unless the user explicitly says so.
 
-**Verify:** apply completes; note that Aurora reboots once (logical replication is a
-static parameter) so it can take ~10–15 min.
+**Verify:** apply completes; the two `clickhouse_clickpipe` resources are created and
+data lands in `raw.customers`, `raw.orders`, `raw.events_raw`. Then go to **T5**.
 
-**If it fails:** read the error; common causes are ClickHouse API auth, a region
-mismatch, or RDS password rules. Fix and re-apply after asking.
+**If it fails:**
 
-## T4 — Read the outputs
+- Blocked a long time at `terraform_data.wait_for_seed` → the EC2 bootstrap is slow
+  or failed. In another shell, inspect it (**[S1-B](#s1-b--the-in-vpc-generator-ec2)**);
+  if the bootstrap died, re-run `sudo bash
+  /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh`, then let the wait finish (it
+  times out after ~20 min).
+- `wait_for_seed` timed out → once `.seeded` exists (per S1-B), just re-run
+  `terraform apply` — it resumes and creates the pipes.
+- Postgres pipe errors that the publication/role is missing → the seed didn't run;
+  confirm the EC2 seeded (S1-B).
+- `curl: command not found` / `aws: command not found` → install them on this host
+  (see T0), then re-apply.
 
-**Say to the user:** "I'll pull the outputs you'll need for seeding and modeling."
+### T4 (two-phase) — opt-out
+
+Only if the user chose two-phase in T2.
+
+1. **Turn the pipe toggles off for phase 1** (you may set these non-secret values
+   after they approve): `enable_postgres_clickpipe = false`,
+   `enable_kinesis_clickpipe = false`. Decide the seeding path with them: keep
+   `enable_generator_ec2 = true` (EC2 seeds, recommended) or set it `false` to seed
+   from their laptop via S1-A.
+2. **Apply phase 1 — HARD GATE.** "Creates the infra — service, Aurora, Kinesis, IAM,
+   PrivateLink — and the EC2 if enabled. No pipes yet. ~10–15 min. Proceed?"
+
+   ```bash
+   terraform plan
+   terraform apply
+   ```
+
+3. **Seed Aurora** → do **[Shared procedure S1 — Seed Aurora](#s1--seed-aurora)**
+   (EC2 path: S1-B to verify; laptop path: S1-A). **The Postgres pipe cannot be
+   created until this completes** — it needs `clickpipes_pub` + `clickpipes_user`.
+4. **Turn the pipe toggles on:** `enable_postgres_clickpipe = true`,
+   `enable_kinesis_clickpipe = true`.
+5. **Apply phase 2 — HARD GATE.** "Now creates the `raw` database and both ClickPipes
+   against the seeded sources. Proceed?"
+
+   ```bash
+   terraform apply
+   ```
+
+   **Verify:** both `clickhouse_clickpipe` resources created; data lands in `raw.*`.
+   Then go to **T5**.
+
+   **If it fails:** Postgres pipe says the publication/role is missing → S1 didn't
+   complete; confirm the seed ran, then re-apply.
+
+## T5 — Read the outputs & confirm data
+
+**Say to the user:** "I'll pull the outputs and confirm data is flowing."
 
 **Run (after approval):**
 
@@ -222,54 +311,20 @@ terraform output
 ```
 
 **Verify & relay:** `aurora_writer_endpoint`, `aurora_database_name`,
-`kinesis_stream_name`, `clickhouse_https_endpoint`, and (if EC2 enabled)
-`generator_ec2_ssm_command`.
+`kinesis_stream_name`, `clickhouse_https_endpoint`, and `generator_ec2_ssm_command`.
+Confirm with the user that `raw.customers`, `raw.orders`, and `raw.events_raw` are
+receiving rows (SQL console).
 
-## T5 — Seed Aurora
-
-→ Do **[Shared procedure S1 — Seed Aurora](#s1--seed-aurora)**, then return here.
-
-## T6 — Create the ClickPipes target database
-
-**Say to the user:** "In the ClickHouse SQL console, create the database the pipes
-write into:"
-
-```sql
-CREATE DATABASE IF NOT EXISTS raw;
-```
-
-**Need from the user:** confirm they ran it.
-
-## T7 — Apply phase 2 (create the ClickPipes) — HARD GATE
-
-**Say to the user:** "Now we flip the pipe flags on and apply again — this creates
-the Postgres CDC pipe and the Kinesis pipe (over PrivateLink). The sources should
-already be seeded and emitting. Proceed?"
-
-**Need from the user:** confirm `enable_postgres_clickpipe = true` and
-`enable_kinesis_clickpipe = true` in `terraform.tfvars` (you may set these after
-they approve).
-
-**Run (after approval):**
-
-```bash
-terraform apply
-```
-
-**Verify:** the two `clickhouse_clickpipe` resources are created; data starts
-arriving in `raw.customers`, `raw.orders`, `raw.events_raw`.
-
-**If it fails:** the Postgres pipe needs `clickpipes_pub` + `clickpipes_user` to
-exist (the seed/migration in S1 creates them) — confirm S1 ran before this.
-
-## T8 — Model & query
+## T6 — Model & query
 
 → Do **[Shared procedure S2 — Model & query](#s2--model--query)**.
 
-## T9 — Teardown (when finished) — HARD GATE
+## T7 — Teardown (when finished) — HARD GATE
 
 **Say to the user:** "This destroys everything Terraform created — the ClickHouse
-service, both pipes, Aurora, and Kinesis. Stop the Python producers first. Proceed?"
+service, both pipes, Aurora, Kinesis, and the generator EC2 (which terminates the
+generators with it). If instead you seeded from your laptop (S1-A), stop those Python
+producers first. Proceed?"
 
 **Run (after approval):**
 
@@ -569,7 +624,38 @@ journalctl -u ch-generators -n 30 --no-pager
 
 Mention `hands-on/scripts/generator_ec2.sh {stop|start|status}` to manage cost.
 
-**Verify:** `ch-generators` is `active (running)`.
+> Driving SSM non-interactively (you can't open an interactive shell)? Run these via
+> `aws ssm send-command --document-name AWS-RunShellScript --instance-ids <id>
+> --parameters 'commands=[...]'` and read the result with `aws ssm
+> get-command-invocation`, rather than `start-session`.
+
+**Verify:** `ch-generators` is `active (running)` **and the bootstrap actually
+finished** — service-active alone isn't enough. Confirm the seed completed:
+
+```bash
+ls -l /opt/ch-workshop/.seeded                        # present ⇒ migrations + seed done
+grep -n "Bootstrap complete" /var/log/cloud-init-output.log
+```
+
+**If it fails:** the most common first-attempt failure is a **timing race** — the EC2
+bootstraps before Aurora's writer endpoint is resolvable / accepting connections, so
+`run_migrations.py` dies (`Name or service not known`, or `server closed the
+connection unexpectedly`) and the service is never installed (`Unit
+ch-generators.service could not be found` / `inactive`, no `.seeded` marker). Aurora
+is up by the time you're verifying, so just re-run the **idempotent** bootstrap:
+
+```bash
+sudo bash /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh
+```
+
+It re-applies migrations, seeds once (guarded by `/opt/ch-workshop/.seeded`), and
+(re)starts the service. ⚠️ If `.seeded` *exists* but the data looks partial/wrong,
+`seed_rds.py` is **not** idempotent — `sudo systemctl stop ch-generators`, `sudo rm -f
+/opt/ch-workshop/.seeded`, truncate the Aurora tables, then re-run. Full detail:
+[hands-on/EC2_GENERATOR.md](hands-on/EC2_GENERATOR.md). (The current CloudFormation and
+Terraform templates prevent this race via a dependency on the Aurora *instance*; the
+re-run is the recovery if the bootstrap fails for any other reason — clone error, a
+transient Aurora blip, etc.)
 
 ## S2 — Model & query
 
@@ -597,4 +683,5 @@ queries."
 | Postgres pipe won't connect | seeding not done, or (Track C) static IPs stale | confirm S1 ran; check override IPs |
 | Kinesis pipe auth error | wrong ClickHouse principal/service | confirm the ARN matches the service |
 | Seeding times out from laptop | IP not allow-listed | add `<ip>/32` to the ingress list, re-apply/redeploy |
+| Generator EC2 has no `ch-generators` service / no `.seeded` | bootstrap ran before Aurora was ready (DNS/connection race), or another bootstrap error | re-run `sudo bash /opt/ch-workshop/hands-on/scripts/ec2_bootstrap.sh` (idempotent) — see S1-B and [EC2_GENERATOR.md](hands-on/EC2_GENERATOR.md) |
 | Rates need changing on a live EC2 | baked into the systemd unit | edit `ExecStart` in `/etc/systemd/system/ch-generators.service`, `daemon-reload`, restart |

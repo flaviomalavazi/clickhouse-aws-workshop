@@ -27,10 +27,18 @@ clickpipes_ingress_cidrs = [
 ]
 
 # --- Pipe toggles ---
-# Phase 1: leave both false, apply, bootstrap Aurora + start producers.
-# Phase 2: flip to true and apply again to create the pipes.
-enable_postgres_clickpipe = false
-enable_kinesis_clickpipe  = false
-enable_generator_ec2      = false
+# All default to true so a SINGLE `terraform apply` brings up everything: the
+# generator EC2 self-seeds Aurora (publication + clickpipes_user + rows), Terraform
+# waits for that to finish, creates the `raw` database, then creates both pipes.
+# (Requires the AWS CLI + curl on the machine running apply.)
+#
+# Prefer the old manual two-phase flow (seed yourself, then create pipes)? Set
+# enable_generator_ec2 = false and both pipe toggles = false for the first apply,
+# seed Aurora, then set the pipe toggles = true and apply again.
+enable_postgres_clickpipe = true
+enable_kinesis_clickpipe  = true
+enable_generator_ec2      = true
+# repo_url defaults to the canonical workshop repo; override for your own fork.
+# repo_url                  = "https://github.com/<org>/clickhouse-aws-workshop"
 generator_cdc_sleep       = 0.1
 generator_kinesis_rate    = 1000

@@ -165,15 +165,15 @@ variable "kinesis_shard_count" {
 ############################################
 
 variable "enable_postgres_clickpipe" {
-  description = "Create the Aurora PostgreSQL CDC ClickPipe. Set to false until the Aurora SQL bootstrap (publication + clickpipes_user) has been run."
+  description = "Create the Aurora PostgreSQL CDC ClickPipe. Default true: the pipe waits for the generator EC2's bootstrap (which creates clickpipes_pub + clickpipes_user and seeds Aurora) to finish, so a single apply works end-to-end. Set false only if you seed manually and prefer the old two-phase apply."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "enable_kinesis_clickpipe" {
-  description = "Create the Kinesis ClickPipe."
+  description = "Create the Kinesis ClickPipe. Default true: it only needs the target database + stream + IAM role, so it is safe to create in a single apply."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "clickhouse_target_database" {
@@ -187,15 +187,15 @@ variable "clickhouse_target_database" {
 ############################################
 
 variable "enable_generator_ec2" {
-  description = "Create an EC2 instance inside the Aurora VPC that self-bootstraps and runs the data generators (migrations + seed + CDC/Kinesis traffic). Connects to Aurora over its private IP, so no public-IP allowlisting is needed."
+  description = "Create an EC2 instance inside the Aurora VPC that self-bootstraps and runs the data generators (migrations + seed + CDC/Kinesis traffic). Connects to Aurora over its private IP, so no public-IP allowlisting is needed. Default true: it is the seeding path that lets a single apply create the Postgres CDC pipe automatically. Set false to seed manually (e.g. from a laptop)."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "repo_url" {
-  description = "Public HTTPS git URL of this workshop repo, cloned by the generator EC2 at boot (e.g. https://github.com/<org>/clickhouse-aws-workshop.git). Required when enable_generator_ec2 = true."
+  description = "Public HTTPS git URL of this workshop repo, cloned by the generator EC2 at boot. Defaults to the workshop's canonical repo; override to point at your own fork/branch."
   type        = string
-  default     = ""
+  default     = "https://github.com/flaviomalavazi/clickhouse-aws-workshop"
 }
 
 variable "repo_branch" {
