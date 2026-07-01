@@ -105,7 +105,7 @@ Everything else has a working default — leave it unless you have a reason to c
 | `AuroraMasterUsername` | `postgres` | you want a different admin user |
 | `KinesisStreamMode` | `ON_DEMAND` | you prefer `PROVISIONED` capacity |
 | `KinesisShardCount` | `1` | only used when `KinesisStreamMode=PROVISIONED` |
-| `ClickPipesIngressCidrsOverride` | _(empty)_ | **you deploy outside `us-east-1`** — set this region's ClickPipes static `/32`s (see below) |
+| `ClickPipesIngressCidrsOverride` | _(empty)_ | **only if the baked static IPs drifted** — the deploy region's IPs are auto-selected otherwise (see below) |
 | `SeedIngressCidrs` | _(empty)_ | you seed Aurora **from your laptop** — set your `<ip>/32` |
 | `RepoBranch` | `main` | the EC2 should check out a different branch |
 | `Ec2InstanceType` | `t4g.micro` | you want a different generator instance size |
@@ -115,21 +115,21 @@ Everything else has a working default — leave it unless you have a reason to c
 
 ## Region & the static-IP Mapping
 
-The baked `ClickPipesEgressIps` Mapping covers **`us-east-1` only** (its 9
-ClickPipes static `/32`s). Deploy there and you don't need to set anything for
-ingress.
+The baked `ClickPipesEgressIps` Mapping now covers **all AWS regions** in the
+ClickPipes docs. `FindInMap` keys on `AWS::Region`, so **whatever region you deploy
+the stack into, the correct ClickPipes static IPs are allow-listed automatically** —
+no override needed. A region not in the Mapping falls back to the **us-east-2** list
+(via the `FindInMap` `DefaultValue`), mirroring ClickPipes' own default.
 
-**Deploying in any other region?** The Mapping won't have it, so set
-`ClickPipesIngressCidrsOverride` to that region's ClickPipes static IPs (as
-`/32`s) from the docs. The template fails fast (a clear `UseRegionMap`/empty
-condition) rather than silently leaving Aurora unreachable.
+**So for the common case you set nothing** — just `--region <your-region>` on the
+deploy. `ClickPipesIngressCidrsOverride` remains available as a manual escape hatch.
 
 > **Static IPs drift.** ClickPipes occasionally changes its egress IPs, and the
 > docs note **date-based caveats** (some regions' IPs only apply to services
-> created after a cut-off date; older services use a fallback region's IPs). The
-> baked list is correct for **new** services in `us-east-1` as of authoring. If a
-> pipe can't connect, re-check the docs and use `ClickPipesIngressCidrsOverride`
-> — it always wins over the baked Mapping.
+> created after a cut-off date). A static Mapping can't express that, so the baked
+> lists are correct for **new** services as of the verified date in the template
+> comment (re-sync periodically). If a pipe can't connect, re-check the docs and set
+> `ClickPipesIngressCidrsOverride` — it always wins over the baked Mapping.
 >
 > Source of truth for the IPs:
 > <https://clickhouse.com/docs/integrations/clickpipes#list-of-static-ips>
@@ -279,8 +279,9 @@ window.
 
 ## Gotchas
 
-- **Baked IPs go stale / wrong region** → use `ClickPipesIngressCidrsOverride`
-  (see [Region & the static-IP Mapping](#region--the-static-ip-mapping)).
+- **Baked IPs go stale** (ClickPipes changed its egress IPs since the template was
+  last synced) → use `ClickPipesIngressCidrsOverride` (see
+  [Region & the static-IP Mapping](#region--the-static-ip-mapping)).
 - **Ordering** — the ClickHouse service must exist _before_ deploy (its IAM
   principal feeds the Kinesis role trust); the `ClickPipesKinesisRoleArn` output is
   needed _after_ to create the Kinesis pipe.

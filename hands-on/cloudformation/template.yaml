@@ -131,10 +131,11 @@ Parameters:
     Type: CommaDelimitedList
     Default: ""
     Description: >-
-      Optional. Comma-separated /32 CIDRs to allow inbound to Aurora on 5432,
-      used INSTEAD of the baked us-east-1 static-IP Mapping. The always-current
-      escape hatch when the baked list goes stale, and the way to deploy in a
-      region other than us-east-1. See the ClickPipes static-IP docs (README).
+      Optional. Comma-separated /32 CIDRs to allow inbound to Aurora on 5432, used
+      INSTEAD of the baked per-region static-IP Mapping. Normally unnecessary: the
+      Mapping auto-selects the deploy region's ClickPipes IPs (with a us-east-2
+      fallback). Use this only as the escape hatch if the baked list goes stale vs
+      the docs. See the ClickPipes static-IP docs (README).
 
   SeedIngressCidrs:
     Type: CommaDelimitedList
@@ -187,10 +188,14 @@ Parameters:
 
 ############################################################
 # Mappings — ClickPipes static egress IPs by region
-#   Verified against https://clickhouse.com/docs/integrations/clickpipes
-#   (#list-of-static-ips). us-east-1 only, per workshop decision; other regions
-#   use ClickPipesIngressCidrsOverride. NOTE: these can change with date-based
-#   caveats — the override param is the mitigation if they go stale.
+#   Source of truth: https://clickhouse.com/docs/integrations/clickpipes
+#   (#list-of-static-ips). Verified 2026-07-01. FindInMap keys on AWS::Region, so
+#   the deploy region auto-selects its IPs; regions not listed here fall back to
+#   the us-east-2 list via the FindInMap DefaultValue (matching ClickHouse's own
+#   fallback rule). CAVEAT: the docs also gate some regions on a service
+#   creation-date cutoff, which a static Mapping can't express — these lists are
+#   correct for NEW services as of the verified date. Re-sync periodically;
+#   ClickPipesIngressCidrsOverride always wins if a region drifts.
 ############################################################
 Mappings:
   ClickPipesEgressIps:
@@ -205,6 +210,150 @@ Mappings:
         - 3.131.130.196/32
         - 3.23.172.68/32
         - 3.20.208.150/32
+    us-east-2:
+      Cidrs:
+        - 3.131.130.196/32
+        - 3.23.172.68/32
+        - 3.20.208.150/32
+        - 3.132.20.192/32
+        - 18.119.76.110/32
+        - 3.134.185.180/32
+    us-west-2:
+      Cidrs:
+        - 52.42.100.5/32
+        - 44.242.47.162/32
+        - 52.40.44.52/32
+        - 44.227.206.163/32
+        - 44.246.241.23/32
+        - 35.83.230.19/32
+    ap-south-1:
+      Cidrs:
+        - 13.203.140.189/32
+        - 13.232.213.12/32
+        - 13.235.145.208/32
+        - 35.154.167.40/32
+        - 65.0.39.245/32
+        - 65.1.225.89/32
+    ap-east-1:
+      Cidrs:
+        - 18.166.168.168/32
+        - 43.199.224.85/32
+        - 95.40.0.242/32
+        - 16.162.107.229/32
+        - 43.199.125.240/32
+        - 54.46.86.27/32
+    ap-northeast-1:
+      Cidrs:
+        - 54.168.88.92/32
+        - 35.76.97.79/32
+        - 54.64.100.89/32
+        - 54.178.40.17/32
+        - 52.195.101.208/32
+        - 13.193.109.245/32
+    ap-northeast-2:
+      Cidrs:
+        - 3.38.68.69/32
+        - 52.78.68.128/32
+        - 13.209.152.13/32
+        - 3.38.24.84/32
+        - 3.37.159.31/32
+        - 3.34.25.104/32
+    ap-southeast-1:
+      Cidrs:
+        - 13.215.65.134/32
+        - 18.139.118.108/32
+        - 47.130.197.47/32
+        - 54.251.134.219/32
+        - 54.254.98.29/32
+        - 54.255.153.106/32
+    ap-southeast-2:
+      Cidrs:
+        - 3.106.48.103/32
+        - 52.62.168.142/32
+        - 13.55.113.162/32
+        - 3.24.61.148/32
+        - 54.206.77.184/32
+        - 54.79.253.17/32
+    ap-southeast-3:
+      Cidrs:
+        - 16.78.195.195/32
+        - 43.218.184.235/32
+        - 16.79.88.54/32
+        - 16.78.153.162/32
+        - 16.79.6.125/32
+        - 108.137.52.155/32
+    ca-central-1:
+      Cidrs:
+        - 52.60.123.235/32
+        - 3.97.222.98/32
+        - 3.99.62.248/32
+        - 15.223.61.186/32
+        - 3.96.255.101/32
+        - 3.97.29.96/32
+    eu-central-1:
+      Cidrs:
+        - 18.195.233.217/32
+        - 3.127.86.90/32
+        - 35.157.23.2/32
+        - 18.197.167.47/32
+        - 3.122.25.29/32
+        - 52.28.148.40/32
+    eu-west-1:
+      Cidrs:
+        - 54.228.1.92/32
+        - 54.72.101.254/32
+        - 54.228.16.208/32
+        - 54.76.200.104/32
+        - 52.211.2.177/32
+        - 54.77.10.134/32
+    eu-west-2:
+      Cidrs:
+        - 13.134.82.158/32
+        - 16.60.209.167/32
+        - 18.134.221.203/32
+        - 16.60.139.176/32
+        - 13.43.66.75/32
+        - 3.11.78.183/32
+    eu-north-1:
+      Cidrs:
+        - 13.63.1.65/32
+        - 16.171.127.30/32
+        - 56.228.76.44/32
+        - 13.63.101.248/32
+        - 16.170.124.188/32
+        - 13.60.109.201/32
+    af-south-1:
+      Cidrs:
+        - 13.245.187.24/32
+        - 15.240.60.178/32
+        - 15.240.81.191/32
+        - 13.245.25.101/32
+        - 13.245.91.225/32
+        - 15.240.54.195/32
+    il-central-1:
+      Cidrs:
+        - 16.164.25.13/32
+        - 51.84.162.29/32
+        - 51.85.90.183/32
+        - 51.84.36.146/32
+        - 51.84.72.29/32
+        - 51.85.28.184/32
+    mx-central-1:
+      Cidrs:
+        - 78.12.67.220/32
+        - 78.12.117.175/32
+        - 78.13.186.238/32
+        - 78.13.219.184/32
+        - 78.13.224.212/32
+        - 78.13.248.162/32
+    sa-east-1:
+      Cidrs:
+        - 18.230.164.131/32
+        - 56.126.1.234/32
+        - 18.230.39.24/32
+        - 15.229.102.116/32
+        - 18.230.174.204/32
+        - 18.229.237.116/32
 
 ############################################################
 # Conditions
@@ -212,10 +361,9 @@ Mappings:
 Conditions:
   # Override supplied -> use it instead of the region Mapping.
   UseOverride: !Not [!Equals [!Join ["", !Ref ClickPipesIngressCidrsOverride], ""]]
-  # Use the baked Mapping only in us-east-1 AND when no override is given.
-  UseRegionMap: !And
-    - !Equals [!Ref "AWS::Region", "us-east-1"]
-    - !Not [!Condition UseOverride]
+  # Use the baked region Mapping whenever no explicit override is given. FindInMap
+  # selects by AWS::Region and falls back to the us-east-2 list for unlisted regions.
+  UseRegionMap: !Not [!Condition UseOverride]
   # Seed CIDRs supplied.
   HasSeedCidrs: !Not [!Equals [!Join ["", !Ref SeedIngressCidrs], ""]]
   # Optional generator EC2.
@@ -279,13 +427,24 @@ Resources:
       Tags:
         - { Key: Name, Value: !Sub "${NamePrefix}-aurora-sg" }
 
-  # --- Aurora ingress, source 1: baked us-east-1 ClickPipes static IPs ---------
+  # --- Aurora ingress, source 1: baked ClickPipes static IPs for the deploy region
   # One AWS::EC2::SecurityGroupIngress per IP. &{Cidr} lets the dotted IP form a
-  # valid logical ID; FindInMap's DefaultValue [] means a non-us-east-1 region
-  # expands to zero rules instead of erroring. Gated by UseRegionMap.
+  # valid logical ID. FindInMap selects the region's list by AWS::Region; a region
+  # not present in the Mapping falls back to the us-east-2 list (DefaultValue),
+  # which is ClickPipes' own default. Gated by UseRegionMap (any region, no override).
   "Fn::ForEach::AuroraCpIngress":
     - Cidr
-    - !FindInMap [ClickPipesEgressIps, !Ref "AWS::Region", Cidrs, { DefaultValue: [] }]
+    - !FindInMap
+      - ClickPipesEgressIps
+      - !Ref "AWS::Region"
+      - Cidrs
+      - DefaultValue:
+          - 3.131.130.196/32
+          - 3.23.172.68/32
+          - 3.20.208.150/32
+          - 3.132.20.192/32
+          - 18.119.76.110/32
+          - 3.134.185.180/32
     - "AuroraCpIngress&{Cidr}":
         Type: AWS::EC2::SecurityGroupIngress
         Condition: UseRegionMap

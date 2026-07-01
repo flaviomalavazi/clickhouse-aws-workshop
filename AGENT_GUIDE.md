@@ -360,9 +360,10 @@ aws configure get region || echo "AWS_REGION=$AWS_REGION"
 cfn-lint --version 2>/dev/null || echo "cfn-lint not installed (optional)"
 ```
 
-**Then confirm:** account is correct, and region is `us-east-1` (the baked
-ClickPipes static-IP list covers `us-east-1` only — other regions need
-`ClickPipesIngressCidrsOverride` later).
+**Then confirm:** account is correct, and note the region. The template now bakes
+the ClickPipes static IPs for **all AWS regions** and selects by `AWS::Region`, so
+any region works with no extra input (unlisted regions fall back to the us-east-2
+list). `ClickPipesIngressCidrsOverride` is only needed if the baked list has drifted.
 
 **If it fails:** old/missing CLI → install AWS CLI v2; wrong account → set
 `AWS_PROFILE`; no region → `export AWS_REGION=...`.
@@ -420,8 +421,9 @@ toggles they ask for.
 `ClickpipesUserPassword` (strong; 8+ chars; avoid `/ @ "` and spaces). Optional
 decisions to walk through:
 
-- **Outside `us-east-1`?** They provide that region's ClickPipes static `/32`s for
-  `ClickPipesIngressCidrsOverride`
+- **Region?** No action needed — the template auto-selects the ClickPipes static
+  IPs for the deploy region. Only set `ClickPipesIngressCidrsOverride` if the baked
+  list has drifted vs the docs
   (<https://clickhouse.com/docs/integrations/clickpipes#list-of-static-ips>).
 - **Seeding from laptop?** Offer to detect their IP for `SeedIngressCidrs` (they
   confirm): `echo "$(curl -s https://checkip.amazonaws.com)/32"`.
@@ -481,8 +483,8 @@ aws cloudformation describe-stack-events --stack-name ch-aws-workshop \
   --output table
 ```
 
-Common causes: subnets not in ≥2 AZs, RDS password rule, or region ≠ us-east-1
-without `ClickPipesIngressCidrsOverride`.
+Common causes: subnets not in ≥2 AZs, or an RDS password rule. (Region no longer
+matters — the ClickPipes static IPs are baked for all regions and auto-selected.)
 
 ## C6 — Read the stack outputs
 
@@ -677,7 +679,7 @@ queries."
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
 | Aurora create fails | subnets not in ≥2 AZs, or RDS password rule | fix subnets/password, re-apply/redeploy |
-| CFN deploy fails, region ≠ us-east-1 | no baked static IPs | set `ClickPipesIngressCidrsOverride`, redeploy |
+| Postgres pipe can't connect (Track C) | baked ClickPipes IPs drifted vs the docs | set `ClickPipesIngressCidrsOverride` to the current IPs, redeploy |
 | `CAPABILITY_NAMED_IAM` error (Track C) | the named Kinesis role | keep `--capabilities CAPABILITY_NAMED_IAM` |
 | ClickHouse provider auth fails (Track T) | API key vars wrong | re-export `CLICKHOUSE_ORG_ID` / `_CLOUD_API_KEY` / `_CLOUD_API_SECRET` |
 | Postgres pipe won't connect | seeding not done, or (Track C) static IPs stale | confirm S1 ran; check override IPs |
