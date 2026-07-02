@@ -511,14 +511,28 @@ aws cloudformation describe-stacks --stack-name ch-aws-workshop \
 pipes — I'll hand you the exact values from the stack outputs. Walkthrough:
 <https://clickhouse.com/docs/integrations/clickpipes/postgres>"
 
-First, in the SQL console: `CREATE DATABASE IF NOT EXISTS raw;`
+**First**, confirm the
+**[S1 readiness gate](#s1-readiness-gate--confirm-the-seed-worked-before-the-cdc-pipe)**
+passed — you should already have told the user *"everything's ready to create your CDC
+ClickPipe."* Then, in the SQL console: `CREATE DATABASE IF NOT EXISTS raw;`
 
 **Postgres CDC pipe** (ClickPipes UI → *Postgres CDC*):
 
 - Host = `AuroraWriterEndpoint`, Port `5432`, Database = `AuroraDatabaseName`
   (the **writer**).
 - User `clickpipes_user`, password = the `ClickpipesUserPassword` they set.
-- Replication mode **CDC**, publication **`clickpipes_pub`**.
+- Publication **`clickpipes_pub`**.
+- **Sync mode — choose "Initial Load + CDC"** (not "CDC only" or "Initial load
+  only"). Explain to the user what this means:
+  - **Initial Load** = a one-time snapshot that copies the rows already sitting in
+    Aurora (the ~500 customers + ~2000 orders the seed inserted) into ClickHouse, so
+    the tables aren't empty at the start.
+  - **CDC** = after that snapshot, ClickPipes streams every ongoing
+    INSERT/UPDATE/DELETE via Postgres logical replication, keeping ClickHouse
+    continuously in sync with the live generator traffic.
+  - Together they give the full demo — the historical rows **and** the live changes.
+    "CDC only" would skip the pre-seeded rows; "Initial load only" would be a one-off
+    copy that never updates.
 - Mappings: `public.customers → customers`, `public.orders → orders`, both
   **ReplacingMergeTree**, destination `raw`.
 
@@ -529,10 +543,11 @@ First, in the SQL console: `CREATE DATABASE IF NOT EXISTS raw;`
 - Format `JSONEachRow`, destination `raw.events_raw` (columns in
   [hands-on/terraform/clickpipes.tf](hands-on/terraform/clickpipes.tf)).
 
-**Verify:** both pipes show data flowing.
+**Verify:** both pipes show data flowing — the Postgres pipe should show a completed
+snapshot (the seeded rows) followed by ongoing CDC.
 
-**If it fails:** Postgres pipe can't connect → static IPs stale/wrong region
-(`ClickPipesIngressCidrsOverride`); Kinesis auth error → confirm
+**If it fails:** Postgres pipe can't connect → baked ClickPipes IPs drifted vs the
+docs (set `ClickPipesIngressCidrsOverride`); Kinesis auth error → confirm
 `ClickHouseIamPrincipalArn` matched this service.
 
 ## C9 — Model & query
@@ -658,6 +673,69 @@ It re-applies migrations, seeds once (guarded by `/opt/ch-workshop/.seeded`), an
 Terraform templates prevent this race via a dependency on the Aurora *instance*; the
 re-run is the recovery if the bootstrap fails for any other reason — clone error, a
 transient Aurora blip, etc.)
+
+### S1 readiness gate — confirm the seed worked before the CDC pipe
+
+**Do this before creating the Postgres CDC ClickPipe, on either track.** The pipe
+validates the publication and role at creation time, so a half-finished seed shows up
+as a confusing pipe error later instead of a clear signal here.
+
+**Ask the user:** "Did the Aurora seed finish successfully?" If they're unsure or want
+proof, offer: "I can connect to the generator EC2, confirm the `.seeded` marker, then
+from there query Aurora to confirm the `clickpipes_user` role, the `clickpipes_pub`
+publication, and that logical replication is on with a free slot — so we know the CDC
+pipe will succeed."
+
+**Run (after approval)** — on the generator EC2 (open a shell, or `aws ssm
+send-command` non-interactively):
+
+1. Bootstrap marker present:
+
+   ```bash
+   ls -l /opt/ch-workshop/.seeded && \
+     grep -q "Bootstrap complete" /var/log/cloud-init-output.log && echo "seed marker OK"
+   ```
+
+2. Aurora-side prerequisites (run from the EC2, which reaches Aurora privately):
+
+   ```bash
+   cd /opt/ch-workshop/hands-on
+   sudo env $(grep -v '^#' /etc/ch-workshop-runtime.env | xargs) /usr/local/bin/uv run python - <<'PY'
+   import db
+   conn = db.connect_with_retry()
+   one = lambda sql: (lambda r: r[0] if r else None)(conn.execute(sql).fetchone())
+   logical = one("show rds.logical_replication")
+   role    = one("select 1 from pg_roles where rolname='clickpipes_user'")
+   repl    = one("select 1 from pg_auth_members m join pg_roles r on m.roleid=r.oid "
+                 "join pg_roles u on m.member=u.oid "
+                 "where u.rolname='clickpipes_user' and r.rolname='rds_replication'")
+   pub     = one("select 1 from pg_publication where pubname='clickpipes_pub'")
+   tabs    = [r[0] for r in conn.execute(
+                 "select tablename from pg_publication_tables where pubname='clickpipes_pub' order by 1").fetchall()]
+   mx, used = conn.execute(
+                 "select current_setting('max_replication_slots')::int, count(*) from pg_replication_slots").fetchone()
+   ok = logical == 'on' and role and repl and pub and {'customers','orders'} <= set(tabs) and used < mx
+   print("logical_replication :", logical)
+   print("clickpipes_user     :", "present" if role else "MISSING")
+   print("  rds_replication   :", "granted" if repl else "MISSING")
+   print("publication         :", ("clickpipes_pub -> " + ", ".join(tabs)) if pub else "MISSING")
+   print("replication slots   :", f"{used}/{mx} used" + (" (free slot available)" if used < mx else " — FULL"))
+   print("RESULT:", "READY" if ok else "NOT READY")
+   PY
+   ```
+
+**Verify:** every line reads present/granted/on and the last line is `RESULT: READY`.
+(The replication *slot itself* is created later by ClickPipes when the pipe is built;
+here we only confirm logical replication is on and a slot is free to consume.)
+
+**Surface to the user — only when every check passes:**
+
+> ✅ Everything's ready to create your CDC ClickPipe.
+
+**If NOT READY:** a `MISSING` role/publication means the migration didn't complete —
+re-run the bootstrap (see "If it fails" above); `logical_replication` not `on` is an
+infra problem (the Aurora cluster parameter group didn't apply), not a seed one. Fix,
+then re-run this gate before creating the pipe.
 
 ## S2 — Model & query
 

@@ -233,7 +233,12 @@ After we've built the AWS components, we can proceed with the data ingestion:
      `AuroraDatabaseName`. (Connect to the **writer** — logical replication only
      runs on the primary.)
    - **User** `clickpipes_user`, password = your `ClickpipesUserPassword`.
-   - Replication mode **CDC**, publication **`clickpipes_pub`**.
+   - Publication **`clickpipes_pub`**.
+   - **Sync mode: "Initial Load + CDC"** — not "CDC only" or "Initial load only".
+     _Initial Load_ snapshots the rows already in Aurora (the seeded ~500 customers +
+     ~2000 orders) into ClickHouse; _CDC_ then streams every ongoing
+     INSERT/UPDATE/DELETE via logical replication. Together you get the historical
+     rows **and** the live changes — which the demo needs.
    - Table mappings: `public.customers → customers`, `public.orders → orders`,
      both **ReplacingMergeTree**, destination database `raw`.
    - The Aurora SG already allow-lists the ClickPipes static IPs, so it connects
